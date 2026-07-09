@@ -247,7 +247,7 @@ export const EN_PLAIN: Record<string, string> = {
   "安装包更新失败，请查看错误提示后重试。": "Installer update failed. Check the error message and retry.",
   "安装包更新进度": "Installer update progress",
   "安装维护": "Install & maintenance",
-  "完整增强": "Full enhancement",
+  "完全增强": "Full enhancement",
   "官方": "Official",
   "官方中转站": "Official relay",
   "官方混入 API Key": "Official mixed-in API Key",
