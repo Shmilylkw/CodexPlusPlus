@@ -27,6 +27,7 @@ import {
   Copy,
   Download,
   Edit3,
+  Gauge,
   GripVertical,
   Info,
   ImagePlus,
@@ -448,6 +449,11 @@ type RelayProfileTestResult = CommandResult<{
   responsePreview: string;
 }>;
 
+type RelayLatencyResult = CommandResult<{
+  latencyMs: number | null;
+  httpStatus: number | null;
+}>;
+
 type StepwiseTestResult = CommandResult<{
   itemCount: number;
   error: string;
@@ -632,22 +638,6 @@ type UpdateResult = CommandResult<{
   progress?: number;
 }>;
 
-type AdItem = {
-  id?: string;
-  type: "sponsor" | "normal" | string;
-  title: string;
-  description: string;
-  url: string;
-  image?: string;
-  highlights?: string[];
-  expires_at?: string;
-};
-
-type AdsResult = CommandResult<{
-  version: number;
-  ads: AdItem[];
-}>;
-
 type ScriptMarketItem = {
   id: string;
   name: string;
@@ -734,6 +724,7 @@ type StartupResult = CommandResult<{
 }>;
 
 type Route = "overview" | "relay" | "relayEnvironment" | "sessions" | "context" | "enhance" | "dreamSkin" | "zedRemote" | "userScripts" | "recommendations" | "maintenance" | "about" | "settings";
+type Route = "overview" | "relay" | "relayEnvironment" | "sessions" | "context" | "enhance" | "dreamSkin" | "zedRemote" | "userScripts" | "maintenance" | "about" | "settings";
 type Theme = "dark" | "light";
 
 const routes: Array<{ id: Route; label: string; icon: LucideIcon; badge?: string }> = [
@@ -745,7 +736,6 @@ const routes: Array<{ id: Route; label: string; icon: LucideIcon; badge?: string
   { id: "dreamSkin", label: t("皮肤管理"), icon: Palette },
   { id: "zedRemote", label: t("Zed 远程项目"), icon: ExternalLink },
   { id: "userScripts", label: t("脚本市场"), icon: FileCode2 },
-  { id: "recommendations", label: t("推荐内容"), icon: ExternalLink },
   { id: "maintenance", label: t("安装维护"), icon: Wrench },
   { id: "about", label: t("关于"), icon: Info },
   { id: "settings", label: t("设置"), icon: Settings },
@@ -887,7 +877,6 @@ export function App() {
     percent: 0,
     message: t("尚未运行安装包更新。"),
   });
-  const [ads, setAds] = useState<AdsResult | null>(null);
   const [scriptMarket, setScriptMarket] = useState<ScriptMarketResult | null>(null);
   const [launchForm, setLaunchForm] = useState({
     appPath: "",
@@ -1618,7 +1607,6 @@ export function App() {
       await refreshSettings(true);
       await refreshScriptMarket(true);
     }
-    if (next === "recommendations") await refreshAds(true);
     if (next === "about") {
       await refreshOverview(true);
       await refreshLogs(true);
@@ -1894,14 +1882,6 @@ export function App() {
     }
   };
 
-  const refreshAds = async (silent = false) => {
-    const result = await run(() => call<AdsResult>("load_ads"));
-    if (result) {
-      setAds(result);
-      if (!silent) showResultNotice(t("推荐内容"), result, { silentSuccess: true });
-    }
-  };
-
   const refreshProviderSyncTargets = async (silent = false) => {
     const result = await run(() => call<ProviderSyncTargetsResult>("load_provider_sync_targets"));
     if (result) {
@@ -2147,6 +2127,10 @@ export function App() {
     if (result) showNotice(t("供应商测试"), result.message, result.status);
   };
 
+  const measureRelayLatency = async (url: string) => {
+    return await run(() => call<RelayLatencyResult>("measure_relay_latency", { url }));
+  };
+
   const diagnoseRelayProfile = async (profile: RelayProfile) => {
     const result = await run(() => call<ProviderDoctorResult>("diagnose_relay_profile", { profile }));
     if (result) showNotice("Provider Doctor", result.message, result.status);
@@ -2260,6 +2244,7 @@ export function App() {
         launchMode: selectedSettings.launchMode,
         status: result.status,
       });
+      showNotice(t("供应商切换"), relayProfileModeSwitchedText(currentSelected), result.status);
     } finally {
       setRelaySwitching(false);
     }
@@ -2571,7 +2556,6 @@ export function App() {
       importCcsProviders,
       refreshLiveContextEntries,
       syncLiveContextEntries,
-      refreshAds,
       refreshScriptMarket,
       installMarketScript,
       setUserScriptEnabled,
@@ -2591,6 +2575,7 @@ export function App() {
       deleteContextEntry,
       extractRelayCommonConfig,
       testRelayProfile,
+      measureRelayLatency,
       diagnoseRelayProfile,
       testStepwiseSettings,
       fetchRelayProfileModels,
@@ -2771,7 +2756,6 @@ export function App() {
             <ZedRemoteScreen projects={zedRemoteProjects} form={settingsForm} onFormChange={setSettingsForm} actions={actions} />
           ) : null}
           {route === "userScripts" ? <UserScriptsScreen settings={settings} market={scriptMarket} actions={actions} /> : null}
-          {route === "recommendations" ? <RecommendationsScreen ads={ads} actions={actions} /> : null}
           {route === "maintenance" ? (
             <MaintenanceScreen
               overview={overview}
@@ -2916,7 +2900,6 @@ type Actions = {
   importCcsProviders: () => Promise<void>;
   refreshLiveContextEntries: () => Promise<LiveContextEntriesResult | null>;
   syncLiveContextEntries: (settings: BackendSettings, silent?: boolean) => Promise<LiveContextEntriesResult | null>;
-  refreshAds: () => Promise<void>;
   refreshScriptMarket: () => Promise<void>;
   installMarketScript: (id: string) => Promise<void>;
   setUserScriptEnabled: (key: string, enabled: boolean) => Promise<void>;
@@ -2941,6 +2924,7 @@ type Actions = {
   deleteContextEntry: (settings: BackendSettings, kind: ContextKind, id: string) => Promise<BackendSettings | null>;
   extractRelayCommonConfig: (configContents: string) => Promise<ExtractRelayCommonConfigResult | null>;
   testRelayProfile: (profile: RelayProfile) => Promise<void>;
+  measureRelayLatency: (url: string) => Promise<RelayLatencyResult | null>;
   diagnoseRelayProfile: (profile: RelayProfile) => Promise<ProviderDoctorResult | null>;
   testStepwiseSettings: (settings: BackendSettings) => Promise<void>;
   fetchRelayProfileModels: (profile: RelayProfile) => Promise<string[] | null>;
@@ -3162,6 +3146,7 @@ function RelayScreen({
   const [detailProfileId, setDetailProfileId] = useState<string | null>(null);
   const [newProfileDraft, setNewProfileDraft] = useState<RelayProfile | null>(null);
   const [thirdPartyImportOpen, setThirdPartyImportOpen] = useState(false);
+  const [latencyRefreshKey, setLatencyRefreshKey] = useState(0);
   const detailProfile = newProfileDraft || (detailProfileId
     ? normalized.relayProfiles.find((profile) => profile.id === detailProfileId) || null
     : null);
@@ -3247,6 +3232,16 @@ function RelayScreen({
           </label>
           <div className="relay-add-row">
             <Button
+              onClick={() => {
+                setLatencyRefreshKey((current) => current + 1);
+                void actions.showMessage(t("一键测速"), t("已重新检测全部可测速供应商的响应延迟。"), "ok");
+              }}
+              variant="secondary"
+            >
+              <Gauge className="h-4 w-4" />
+              {t("一键测速")}
+            </Button>
+            <Button
               variant="secondary"
               onClick={() => {
                 setNewProfileDraft(createRelayProfile(normalized));
@@ -3301,6 +3296,7 @@ function RelayScreen({
             onFormChange={saveRelaySettings}
             disabled={!normalized.relayProfilesEnabled || actions.relaySwitching}
             actions={actions}
+            latencyRefreshKey={latencyRefreshKey}
           />
         </CardContent>
       </Panel>
@@ -4533,43 +4529,6 @@ function SessionsScreen({
   );
 }
 
-function RecommendationsScreen({ ads, actions }: { ads: AdsResult | null; actions: Actions }) {
-  const items = (ads?.ads ?? []).filter((ad) => !isExpiredAd(ad));
-  const sponsors = items.filter((ad) => ad.type === "sponsor");
-  const normal = items.filter((ad) => ad.type === "normal");
-  return (
-    <>
-      <Panel>
-        <CardHead title={t("推荐内容")} detail={t("与 Codex 内插件菜单使用同一个远端广告源")} />
-        <CardContent>
-          <div className="recommend-hero">
-            <div>
-              <strong>{ads ? tf("已加载 {0} 条推荐", [items.length]) : t("尚未加载推荐内容")}</strong>
-              <span>{t("内容来自 BigPizzaV3/Ad-List，分为赞助商推荐和普通推荐。")}</span>
-            </div>
-            <Button onClick={() => void actions.refreshAds()}>
-              <RefreshCw className="h-4 w-4" />
-              {t("刷新推荐")}
-            </Button>
-          </div>
-        </CardContent>
-      </Panel>
-      <Panel>
-        <CardHead title={t("赞助商推荐")} detail={tf("{0} 条", [sponsors.length])} />
-        <CardContent>
-          <AdGrid actions={actions} ads={sponsors} empty={t("暂无赞助商推荐。")} />
-        </CardContent>
-      </Panel>
-      <Panel>
-        <CardHead title={t("普通推荐")} detail={tf("{0} 条", [normal.length])} />
-        <CardContent>
-          <AdGrid actions={actions} ads={normal} empty={t("暂无普通推荐。")} />
-        </CardContent>
-      </Panel>
-    </>
-  );
-}
-
 function MaintenanceScreen({
   overview,
   watcher,
@@ -5030,12 +4989,14 @@ function RelayProfileList({
   onEdit,
   disabled = false,
   actions,
+  latencyRefreshKey,
 }: {
   form: BackendSettings;
   onFormChange: (value: BackendSettings) => void;
   onEdit: (id: string) => void;
   disabled?: boolean;
   actions: Actions;
+  latencyRefreshKey: number;
 }) {
   const sensors = useSensors(
     useSensor(PointerSensor, {
@@ -5065,6 +5026,7 @@ function RelayProfileList({
               onFormChange={onFormChange}
               disabled={disabled}
               profile={profile}
+              latencyRefreshKey={latencyRefreshKey}
             />
           ))}
         </div>
@@ -5081,6 +5043,7 @@ function SortableRelayProfileCard({
   onEdit,
   disabled = false,
   actions,
+  latencyRefreshKey,
 }: {
   form: BackendSettings;
   profile: RelayProfile;
@@ -5089,13 +5052,57 @@ function SortableRelayProfileCard({
   onEdit: (id: string) => void;
   disabled?: boolean;
   actions: Actions;
+  latencyRefreshKey: number;
 }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: profile.id });
   const active = profile.id === form.activeRelayId;
+  const latencyTarget = relayProfileLatencyTarget(profile);
+  const [latency, setLatency] = useState<{
+    status: "idle" | "loading" | "ok" | "failed";
+    latencyMs: number | null;
+  }>({
+    status: latencyTarget ? "loading" : "idle",
+    latencyMs: null,
+  });
   const style: CSSProperties = {
     transform: CSS.Transform.toString(transform),
     transition,
   };
+  const refreshLatency = async () => {
+    if (!latencyTarget) {
+      setLatency({ status: "idle", latencyMs: null });
+      return;
+    }
+    setLatency({ status: "loading", latencyMs: null });
+    const result = await actions.measureRelayLatency(latencyTarget);
+    setLatency(
+      result && isSuccessStatus(result.status) && result.latencyMs !== null
+        ? { status: "ok", latencyMs: result.latencyMs }
+        : { status: "failed", latencyMs: null },
+    );
+  };
+
+  useEffect(() => {
+    let active = true;
+    if (!latencyTarget) {
+      setLatency({ status: "idle", latencyMs: null });
+      return () => {
+        active = false;
+      };
+    }
+    setLatency({ status: "loading", latencyMs: null });
+    void actions.measureRelayLatency(latencyTarget).then((result) => {
+      if (!active) return;
+      setLatency(
+        result && isSuccessStatus(result.status) && result.latencyMs !== null
+          ? { status: "ok", latencyMs: result.latencyMs }
+          : { status: "failed", latencyMs: null },
+      );
+    });
+    return () => {
+      active = false;
+    };
+  }, [latencyTarget, latencyRefreshKey]);
 
   return (
     <div
@@ -5122,11 +5129,32 @@ function SortableRelayProfileCard({
       <span className="relay-index" title={profile.name || t("未命名供应商")}>
         {providerInitial(profile.name)}
       </span>
-      <span className="relay-summary">
-        <strong>{profile.name || t("未命名供应商")}</strong>
-        <small>{relayModeLabel(profile.relayMode)} · {relayProtocolLabel(profile.protocol)} · {relayProfileConfigBrief(profile)}</small>
-      </span>
-      <span className="relay-card-actions">
+        <span className="relay-summary">
+          <strong>{profile.name || t("未命名供应商")}</strong>
+          <small>{relayModeLabel(profile.relayMode)} · {relayProtocolLabel(profile.protocol)} · {relayProfileConfigBrief(profile)}</small>
+        </span>
+        <button
+          className={`relay-latency ${latency.status}`}
+          disabled={!latencyTarget || latency.status === "loading"}
+          onClick={(event) => {
+            event.stopPropagation();
+            void refreshLatency();
+          }}
+          title={latencyTarget ? t("重新检测延迟") : t("此供应商没有单一目标 URL")}
+          type="button"
+        >
+          <Gauge className="h-4 w-4" />
+          <span>
+            {latency.status === "loading"
+              ? "..."
+              : latency.status === "ok" && latency.latencyMs !== null
+                ? tf("{0} ms", [latency.latencyMs])
+                : latency.status === "failed"
+                  ? t("不可用")
+                  : "--"}
+          </span>
+        </button>
+        <span className="relay-card-actions">
         <Button
           className={`relay-use-button ${active ? "active" : ""}`}
           disabled={disabled}
@@ -6778,40 +6806,6 @@ function ScriptRow({ script, actions }: { script: NonNullable<UserScriptInventor
   );
 }
 
-function AdGrid({ ads, empty, actions }: { ads: AdItem[]; empty: string; actions: Actions }) {
-  if (!ads.length) return <div className="empty">{empty}</div>;
-  return (
-    <div className="ad-grid">
-      {ads.map((ad) => (
-        <button className="ad-card" key={ad.id || `${ad.type}-${ad.title}`} onClick={() => void actions.openExternalUrl(ad.url)} type="button">
-          {ad.image ? <img alt="" className="ad-image" src={ad.image} /> : null}
-          <div>
-            <strong>{ad.title}</strong>
-            <p>{ad.description}</p>
-          </div>
-          {ad.highlights?.length ? (
-            <div className="ad-tags">
-              {ad.highlights.map((item) => (
-                <span key={item}>{item}</span>
-              ))}
-            </div>
-          ) : null}
-          <span className="ad-link">
-            {t("打开")}
-            <ExternalLink className="h-4 w-4" />
-          </span>
-        </button>
-      ))}
-    </div>
-  );
-}
-
-function isExpiredAd(ad: AdItem) {
-  if (!ad.expires_at) return false;
-  const expiresAt = Date.parse(ad.expires_at);
-  return Number.isFinite(expiresAt) && expiresAt < Date.now();
-}
-
 function routeTitle(route: Route) {
   return routes.find((item) => item.id === route)?.label ?? t("概览");
 }
@@ -6827,7 +6821,6 @@ function routeSubtitle(route: Route) {
     dreamSkin: t("Codex-Dream-Skin 风格主题和换图"),
     zedRemote: t("管理 Codex SSH 项目并加入 Zed workspace"),
     userScripts: t("内置和用户自定义脚本清单"),
-    recommendations: t("赞助商推荐与普通推荐"),
     maintenance: t("入口安装、修复、Watcher 与手动启动"),
     about: t("版本信息、项目链接、GitHub Release 更新、日志与诊断"),
     settings: t("主题和启动参数"),
@@ -7747,6 +7740,15 @@ function relayProfileConfigBrief(profile: RelayProfile): string {
   return profile.baseUrl || t("未填写 URL");
 }
 
+function relayProfileLatencyTarget(profile: RelayProfile): string {
+  if (isAggregateRelayProfile(profile)) return "";
+  if (profile.relayMode === "official" && !profile.officialMixApiKey) return "";
+  if (profile.protocol === "chatCompletions") {
+    return (profile.upstreamBaseUrl || profile.baseUrl).trim();
+  }
+  return profile.baseUrl.trim();
+}
+
 function relayProfileModeHelp(profile: RelayProfile): string {
   if (isAggregateRelayProfile(profile)) {
     return t("聚合供应商只保存成员和策略配置，成员来自已有 API 供应商；切为当前后会通过本地协议代理轮转请求。");
@@ -7792,6 +7794,19 @@ function relayProfileSwitchCommand(profile: RelayProfile): "clear_relay_injectio
   if (profile.relayMode === "official" && !profile.officialMixApiKey) return "clear_relay_injection";
   if (profile.configContents.trim()) return "apply_relay_injection";
   return profile.officialMixApiKey ? "apply_relay_injection" : "clear_relay_injection";
+}
+
+function relayProfileModeSwitchedText(profile: RelayProfile): string {
+  if (isAggregateRelayProfile(profile)) {
+    return t("已切换到聚合供应商；Codex增强已设为完全增强，真实对话会按所选策略轮转成员。");
+  }
+  if (profile.relayMode === "pureApi") {
+    return t("已按此供应商切换到纯 API；Codex增强已设为完全增强。");
+  }
+  if (profile.officialMixApiKey) {
+    return t("已按此供应商使用官方登录，并混入 API Key；Codex增强已设为完全增强。");
+  }
+  return t("已按此供应商切回官方登录；Codex增强已设为完全增强。");
 }
 
 function withGeneratedRelayFiles(profile: RelayProfile): RelayProfile {

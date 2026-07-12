@@ -271,6 +271,13 @@ pub struct RelayProfileTestPayload {
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct RelayLatencyPayload {
+    pub latency_ms: Option<u64>,
+    pub http_status: Option<u16>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct StepwiseTestPayload {
     pub item_count: usize,
     pub error: String,
@@ -401,12 +408,6 @@ pub struct DiagnosticsPayload {
 pub struct WatcherPayload {
     pub enabled: bool,
     pub disabled_flag: String,
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub struct AdsPayload {
-    pub version: u64,
-    pub ads: Vec<Value>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -2028,20 +2029,6 @@ fn persist_provider_sync_selection(provider: &str) {
 }
 
 #[tauri::command]
-pub async fn load_ads() -> CommandResult<AdsPayload> {
-    match codex_plus_core::ads::fetch_ad_list().await {
-        Ok(payload) => ok("推荐内容已加载。", ads_payload(payload)),
-        Err(error) => failed(
-            &format!("推荐内容加载失败：{error}"),
-            AdsPayload {
-                version: 1,
-                ads: Vec::new(),
-            },
-        ),
-    }
-}
-
-#[tauri::command]
 pub async fn refresh_script_market() -> CommandResult<ScriptMarketPayload> {
     match script_market::fetch_market_manifest(script_market::DEFAULT_MARKET_INDEX_URL).await {
         Ok(manifest) => ok(
@@ -3067,6 +3054,26 @@ pub async fn test_relay_profile(profile: RelayProfile) -> CommandResult<RelayPro
 }
 
 #[tauri::command]
+pub async fn measure_relay_latency(url: String) -> CommandResult<RelayLatencyPayload> {
+    match codex_plus_core::relay_latency::measure_relay_latency(&url).await {
+        Ok(measurement) => ok(
+            "目标 URL 延迟检测完成。",
+            RelayLatencyPayload {
+                latency_ms: Some(measurement.latency_ms),
+                http_status: Some(measurement.http_status),
+            },
+        ),
+        Err(error) => failed(
+            &format!("目标 URL 延迟检测失败：{error}"),
+            RelayLatencyPayload {
+                latency_ms: None,
+                http_status: None,
+            },
+        ),
+    }
+}
+
+#[tauri::command]
 pub async fn test_stepwise_settings(
     settings: BackendSettings,
 ) -> CommandResult<StepwiseTestPayload> {
@@ -3814,17 +3821,6 @@ fn read_optional_text_file(path: &std::path::Path) -> anyhow::Result<String> {
         Ok(contents) => Ok(contents),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(String::new()),
         Err(error) => Err(error.into()),
-    }
-}
-
-fn ads_payload(payload: Value) -> AdsPayload {
-    AdsPayload {
-        version: payload.get("version").and_then(Value::as_u64).unwrap_or(1),
-        ads: payload
-            .get("ads")
-            .and_then(Value::as_array)
-            .cloned()
-            .unwrap_or_default(),
     }
 }
 
@@ -5173,18 +5169,6 @@ model_reasoning_effort = "high"
                 .relay_context_config_contents
                 .contains("[mcp_servers.context7]")
         );
-    }
-
-    #[test]
-    fn ads_payload_keeps_version_and_ad_items() {
-        let payload = ads_payload(json!({
-            "version": 1,
-            "ads": [{"id": "ad-1", "type": "normal", "title": "Ad"}]
-        }));
-
-        assert_eq!(payload.version, 1);
-        assert_eq!(payload.ads.len(), 1);
-        assert_eq!(payload.ads[0]["id"], json!("ad-1"));
     }
 
     #[test]

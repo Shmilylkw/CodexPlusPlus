@@ -1,4 +1,3 @@
-pub mod ads;
 pub mod app_paths;
 pub mod assets;
 pub mod bridge;
@@ -30,6 +29,7 @@ pub mod provider_import;
 pub mod proxy;
 pub mod relay_config;
 pub mod relay_environment;
+pub mod relay_latency;
 pub mod relay_rotation;
 pub mod relay_switch;
 pub mod routes;
