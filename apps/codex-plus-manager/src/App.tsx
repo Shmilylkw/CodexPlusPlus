@@ -454,6 +454,13 @@ type RelayLatencyResult = CommandResult<{
   httpStatus: number | null;
 }>;
 
+type ModelHiTestResult = {
+  status: "waiting" | "running" | "ok" | "failed";
+  httpStatus: number;
+  durationMs: number;
+  message: string;
+};
+
 type StepwiseTestResult = CommandResult<{
   itemCount: number;
   error: string;
@@ -2122,9 +2129,10 @@ export function App() {
     return result && isSuccessStatus(result.status) ? result : null;
   };
 
-  const testRelayProfile = async (profile: RelayProfile) => {
+  const testRelayProfile = async (profile: RelayProfile, silent = false) => {
     const result = await run(() => call<RelayProfileTestResult>("test_relay_profile", { profile }));
-    if (result) showNotice(t("供应商测试"), result.message, result.status);
+    if (result && !silent) showNotice(t("供应商测试"), result.message, result.status);
+    return result;
   };
 
   const measureRelayLatency = async (url: string) => {
@@ -2923,7 +2931,7 @@ type Actions = {
   ) => Promise<BackendSettings | null>;
   deleteContextEntry: (settings: BackendSettings, kind: ContextKind, id: string) => Promise<BackendSettings | null>;
   extractRelayCommonConfig: (configContents: string) => Promise<ExtractRelayCommonConfigResult | null>;
-  testRelayProfile: (profile: RelayProfile) => Promise<void>;
+  testRelayProfile: (profile: RelayProfile, silent?: boolean) => Promise<RelayProfileTestResult | null>;
   measureRelayLatency: (url: string) => Promise<RelayLatencyResult | null>;
   diagnoseRelayProfile: (profile: RelayProfile) => Promise<ProviderDoctorResult | null>;
   testStepwiseSettings: (settings: BackendSettings) => Promise<void>;
@@ -5436,6 +5444,8 @@ function RelayProfileEditor({
   const [doctorResult, setDoctorResult] = useState<ProviderDoctorResult | null>(null);
   const [doctorOpen, setDoctorOpen] = useState(false);
   const [doctorRunning, setDoctorRunning] = useState(false);
+  const [modelHiTestRunning, setModelHiTestRunning] = useState(false);
+  const [modelHiTestResults, setModelHiTestResults] = useState<Record<string, ModelHiTestResult>>({});
   // 纯 Responses 模式（非聚合）下 VLM/Strip 不生效，禁用下拉
   const vlmUnsupportedProtocol = profile.protocol === "responses" && !isAggregateRelayProfile(profile);
   if (isAggregateRelayProfile(profile)) {
@@ -5464,6 +5474,58 @@ function RelayProfileEditor({
   };
   const addModelWindowRows = (rows: ModelWindowRow[]) => {
     setModelWindowRows(mergeModelWindowRows(modelWindowRows, rows));
+  };
+  const runAllModelHiTests = async () => {
+    if (modelHiTestRunning) return;
+    const serializedRows = serializeModelWindowRows(modelWindowRows);
+    const testProfile = deriveRelayProfileFromFiles({
+      ...profile,
+      modelList: serializedRows.modelList,
+      modelWindows: serializedRows.modelWindows,
+    });
+    const upstreamModels = await actions.fetchRelayProfileModels(testProfile);
+    const models = Array.from(new Set((upstreamModels ?? []).map((model) => model.trim()).filter(Boolean)));
+    if (!models.length) return;
+
+    addModelWindowRows(models.map((model) => ({ model, window: "" })));
+    setModelHiTestResults(
+      Object.fromEntries(
+        models.map((model) => [model, { status: "waiting", httpStatus: 0, durationMs: 0, message: "" }]),
+      ),
+    );
+    setModelHiTestRunning(true);
+    let succeeded = 0;
+    let failed = 0;
+    try {
+      for (const model of models) {
+        setModelHiTestResults((current) => ({
+          ...current,
+          [model]: { status: "running", httpStatus: 0, durationMs: 0, message: "" },
+        }));
+        const startedAt = performance.now();
+        const result = await actions.testRelayProfile({ ...testProfile, testModel: model }, true);
+        const durationMs = Math.max(1, Math.round(performance.now() - startedAt));
+        const passed = !!result && isSuccessStatus(result.status) && result.httpStatus < 400;
+        if (passed) succeeded += 1;
+        else failed += 1;
+        setModelHiTestResults((current) => ({
+          ...current,
+          [model]: {
+            status: passed ? "ok" : "failed",
+            httpStatus: result?.httpStatus ?? 0,
+            durationMs,
+            message: result?.message ?? t("测试请求失败。"),
+          },
+        }));
+      }
+    } finally {
+      setModelHiTestRunning(false);
+    }
+    await actions.showMessage(
+      t("批量模型测试"),
+      tf("模型测试完成：成功 {0} 个，失败 {1} 个。", [succeeded, failed]),
+      failed ? "failed" : "ok",
+    );
   };
   const runProviderDoctor = async () => {
     setDoctorOpen(true);
@@ -5730,7 +5792,42 @@ function RelayProfileEditor({
                 <Download className="h-4 w-4" />
                 {t("从上游获取")}
               </Button>
+              <Button
+                disabled={modelHiTestRunning}
+                onClick={() => void runAllModelHiTests()}
+                size="sm"
+                type="button"
+                variant="secondary"
+              >
+                <TestTube className="h-4 w-4" />
+                {modelHiTestRunning
+                  ? tf("正在测试 {0}/{1}", [
+                      Object.values(modelHiTestResults).filter((result) => result.status === "ok" || result.status === "failed").length,
+                      Object.keys(modelHiTestResults).length,
+                    ])
+                  : t("批量 hi 测试")}
+              </Button>
             </div>
+            {Object.keys(modelHiTestResults).length ? (
+              <div className="relay-model-test-results">
+                {Object.entries(modelHiTestResults).map(([model, result]) => (
+                  <div className={`relay-model-test-result ${result.status}`} key={model} title={result.message || model}>
+                    <code>{model}</code>
+                    <span>
+                      {result.status === "waiting"
+                        ? t("等待测试")
+                        : result.status === "running"
+                          ? t("测试中…")
+                          : result.status === "ok"
+                            ? tf("HTTP {0} · {1} ms", [result.httpStatus, result.durationMs])
+                            : result.httpStatus
+                              ? tf("HTTP {0} · 失败 · {1} ms", [result.httpStatus, result.durationMs])
+                              : tf("请求失败 · {0} ms", [result.durationMs])}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            ) : null}
             <p className="field-hint">
               {t("每行一个模型；上下文窗口可填")} <code>1M</code>{t("、")}<code>200K</code> {t("或")} <code>1000000</code>{t("，留空表示使用 Codex 默认长度。")}
             </p>
