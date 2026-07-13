@@ -1168,7 +1168,10 @@ pub async fn sync_providers_now(target_provider: Option<String>) -> CommandResul
         .filter(|value| !value.is_empty());
     let target_for_settings = target_provider.clone();
     let result = tauri::async_runtime::spawn_blocking(move || {
-        codex_plus_data::run_provider_sync_with_target(None, target_provider.as_deref())
+        codex_plus_data::run_provider_sync_preserving_projects_with_target(
+            None,
+            target_provider.as_deref(),
+        )
     })
     .await
     .map_err(|error| anyhow::anyhow!("provider sync task failed: {error}"));

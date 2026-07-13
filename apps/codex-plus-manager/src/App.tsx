@@ -3200,7 +3200,7 @@ function SessionsScreen({
             />
             <span>
               <strong>{t("启动前自动修复历史会话")}</strong>
-              <small>{t("开启后，通过 Codex++ 启动 Codex 前自动整理一次旧对话的归属标记。")}</small>
+              <small>{t("开启后，通过 Codex++ 启动 Codex 前自动修复旧对话的供应商可见性，不改写项目或工作区路径。")}</small>
             </span>
           </label>
           <Toolbar>

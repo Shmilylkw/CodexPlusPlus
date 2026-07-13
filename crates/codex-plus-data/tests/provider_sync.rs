@@ -1,6 +1,6 @@
 use codex_plus_data::{
     ProviderSyncStatus, ProviderSyncTargetSource, load_provider_sync_targets, run_provider_sync,
-    run_provider_sync_with_target,
+    run_provider_sync_preserving_projects, run_provider_sync_with_target,
 };
 use rusqlite::Connection;
 use serde_json::json;
@@ -310,6 +310,44 @@ fn provider_sync_updates_rollout_sqlite_visibility_and_creates_backup() {
     let backup_dir = result.backup_dir.unwrap();
     assert!(backup_dir.join("session-meta-backup.json").exists());
     assert!(backup_dir.join("db/state_5.sqlite").exists());
+}
+
+#[test]
+fn provider_sync_preserving_projects_keeps_cwd_and_global_state_unchanged() {
+    let tmp = tempdir().unwrap();
+    let home = tmp.path().join(".codex");
+    fs::create_dir(&home).unwrap();
+    fs::write(home.join("config.toml"), "model_provider = \"apigather\"\n").unwrap();
+    let rollout = home.join("sessions/2026/rollout-abc.jsonl");
+    write_rollout(&rollout, "openai", "thread-1", r"\\?\C:\workspace");
+    create_state_db(&home.join("state_5.sqlite"));
+    let global_state = json!({
+        "electron-saved-workspace-roots": [r"\\?\C:\workspace"],
+        "project-order": [r"\\?\C:\workspace"],
+        "active-workspace-roots": r"\\?\C:\workspace"
+    })
+    .to_string();
+    fs::write(home.join(".codex-global-state.json"), &global_state).unwrap();
+
+    let result = run_provider_sync_preserving_projects(Some(&home));
+
+    assert_eq!(result.status, ProviderSyncStatus::Synced);
+    assert_eq!(result.sqlite_provider_rows_updated, 1);
+    assert_eq!(result.sqlite_cwd_rows_updated, 0);
+    assert_eq!(result.updated_workspace_roots, 0);
+    let db = Connection::open(home.join("state_5.sqlite")).unwrap();
+    let row: (String, String) = db
+        .query_row(
+            "SELECT model_provider, cwd FROM threads WHERE id = 'thread-1'",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(row, ("apigather".to_string(), "C:/old".to_string()));
+    assert_eq!(
+        fs::read_to_string(home.join(".codex-global-state.json")).unwrap(),
+        global_state
+    );
 }
 
 #[test]

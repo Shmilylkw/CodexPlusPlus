@@ -300,8 +300,8 @@ export const EN_PLAIN: Record<string, string> = {
   "应用路径留空时使用已保存路径；没有保存路径时使用自动探测": "When the app path is empty, the saved path is used; with no saved path, auto-detection is used",
   "应用路径覆盖": "App path override",
   "开启": "On",
-  "开启后，通过 Codex++ 启动 Codex 前自动整理一次旧对话的归属标记。":
-    "When on, tidies up ownership tags of old conversations once before launching Codex through Codex++.",
+  "开启后，通过 Codex++ 启动 Codex 前自动修复旧对话的供应商可见性，不改写项目或工作区路径。":
+    "When on, repairs provider visibility for old conversations before launching Codex through Codex++, without changing project or workspace paths.",
   "强制中文界面": "Force Chinese UI",
   "强制启用 Codex App 内置 zh-CN 语言包，避免 Statsig/VPN 不通时回退英文。需重启 Codex 才能完整生效。":
     "Forces the Codex app's built-in zh-CN language pack to avoid falling back to English when Statsig/VPN is unreachable. Requires restarting Codex to fully apply.",

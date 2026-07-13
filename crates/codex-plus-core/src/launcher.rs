@@ -256,6 +256,8 @@ where
 
     let result: anyhow::Result<LaunchHandle> = async {
         if settings.provider_sync_enabled {
+            // 先写入当前供应商，避免历史修复按上次供应商标记会话。
+            hooks.apply_active_relay_profile(&settings).await?;
             hooks.run_provider_sync().await?;
         }
         if let Err(error) = hooks.ensure_plugin_marketplace_config(&settings).await {
@@ -269,7 +271,9 @@ where
         if settings.computer_use_guard_enabled {
             hooks.ensure_computer_use_config(&settings).await?;
         }
-        hooks.apply_active_relay_profile(&settings).await?;
+        if !settings.provider_sync_enabled {
+            hooks.apply_active_relay_profile(&settings).await?;
+        }
         let home = crate::relay_config::default_codex_home_dir();
         match crate::codex_sqlite::sanitize_historical_model_suffixes(&home) {
             Ok(result) if result.updated > 0 => {

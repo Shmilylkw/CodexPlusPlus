@@ -104,6 +104,12 @@ struct SqliteUpdateCounts {
     cwd_rows: usize,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ProviderSyncScope {
+    Full,
+    PreserveProjects,
+}
+
 impl SqliteUpdateCounts {
     fn total(&self) -> usize {
         self.provider_rows + self.user_event_rows + self.cwd_rows
@@ -120,9 +126,36 @@ pub fn run_provider_sync(codex_home: Option<&Path>) -> ProviderSyncResult {
     run_provider_sync_with_target(codex_home, None)
 }
 
+pub fn run_provider_sync_preserving_projects(codex_home: Option<&Path>) -> ProviderSyncResult {
+    run_provider_sync_with_scope(codex_home, None, ProviderSyncScope::PreserveProjects)
+}
+
 pub fn run_provider_sync_with_target(
     codex_home: Option<&Path>,
     explicit_target_provider: Option<&str>,
+) -> ProviderSyncResult {
+    run_provider_sync_with_scope(
+        codex_home,
+        explicit_target_provider,
+        ProviderSyncScope::Full,
+    )
+}
+
+pub fn run_provider_sync_preserving_projects_with_target(
+    codex_home: Option<&Path>,
+    explicit_target_provider: Option<&str>,
+) -> ProviderSyncResult {
+    run_provider_sync_with_scope(
+        codex_home,
+        explicit_target_provider,
+        ProviderSyncScope::PreserveProjects,
+    )
+}
+
+fn run_provider_sync_with_scope(
+    codex_home: Option<&Path>,
+    explicit_target_provider: Option<&str>,
+    scope: ProviderSyncScope,
 ) -> ProviderSyncResult {
     let home = codex_home
         .map(Path::to_path_buf)
@@ -178,14 +211,18 @@ pub fn run_provider_sync_with_target(
             .filter(|change| change.has_user_event)
             .filter_map(|change| change.thread_id.clone())
             .collect::<HashSet<_>>();
-        let projectless_thread_ids =
-            load_projectless_thread_ids(&home.join(".codex-global-state.json"))?;
-        let cwd_by_thread_id = collected
-            .changes
-            .iter()
-            .filter_map(|change| Some((change.thread_id.clone()?, change.cwd.clone()?)))
-            .filter(|(thread_id, _)| !projectless_thread_ids.contains(thread_id))
-            .collect::<HashMap<_, _>>();
+        let cwd_by_thread_id = if scope == ProviderSyncScope::Full {
+            let projectless_thread_ids =
+                load_projectless_thread_ids(&home.join(".codex-global-state.json"))?;
+            collected
+                .changes
+                .iter()
+                .filter_map(|change| Some((change.thread_id.clone()?, change.cwd.clone()?)))
+                .filter(|(thread_id, _)| !projectless_thread_ids.contains(thread_id))
+                .collect::<HashMap<_, _>>()
+        } else {
+            HashMap::new()
+        };
         let sqlite_paths = codex_plus_core::codex_sqlite::codex_session_db_paths_from_home(&home);
         let sqlite_update_count = count_sqlite_updates_for_paths(
             &sqlite_paths,
@@ -193,8 +230,11 @@ pub fn run_provider_sync_with_target(
             &thread_ids_with_user_events,
             &cwd_by_thread_id,
         )?;
-        let global_state_update_count =
-            count_global_state_updates(&home.join(".codex-global-state.json"))?;
+        let global_state_update_count = if scope == ProviderSyncScope::Full {
+            count_global_state_updates(&home.join(".codex-global-state.json"))?
+        } else {
+            0
+        };
         if rewrite_changes.is_empty() && sqlite_update_count == 0 && global_state_update_count == 0
         {
             let mut synced = result(
@@ -218,8 +258,11 @@ pub fn run_provider_sync_with_target(
                 &thread_ids_with_user_events,
                 &cwd_by_thread_id,
             )?;
-            let updated_workspace_roots =
-                apply_global_state_update(&home.join(".codex-global-state.json"))?;
+            let updated_workspace_roots = if scope == ProviderSyncScope::Full {
+                apply_global_state_update(&home.join(".codex-global-state.json"))?
+            } else {
+                0
+            };
             prune_backups(&home)?;
             Ok((sqlite_updates, updated_workspace_roots))
         })();
