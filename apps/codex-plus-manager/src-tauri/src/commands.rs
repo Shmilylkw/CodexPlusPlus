@@ -437,8 +437,30 @@ pub fn launch_codex_plus(request: LaunchRequest) -> CommandResult<Value> {
 #[tauri::command]
 pub fn restart_codex_plus(request: LaunchRequest) -> CommandResult<Value> {
     codex_plus_core::watcher::stop_launcher_processes_and_wait();
-    codex_plus_core::watcher::stop_codex_processes_and_wait();
+    stop_requested_codex_processes(&request);
     spawn_codex_plus_launch(request, "Codex 已请求重启，启动任务正在后台运行。")
+}
+
+fn stop_requested_codex_processes(request: &LaunchRequest) {
+    let settings = SettingsStore::default().load().unwrap_or_default();
+    let explicit_path =
+        (!request.app_path.trim().is_empty()).then(|| Path::new(request.app_path.trim()));
+    let app_dir = codex_plus_core::app_paths::resolve_codex_app_dir_with_saved(
+        explicit_path,
+        Some(settings.codex_app_path.as_str()),
+    );
+    let _ = codex_plus_core::diagnostic_log::append_diagnostic_log(
+        "manager.restart_target",
+        json!({
+            "requested_app_path": request.app_path.trim(),
+            "resolved_app_dir": app_dir.as_ref().map(|path| path.to_string_lossy().to_string()),
+        }),
+    );
+    if let Some(app_dir) = app_dir {
+        codex_plus_core::watcher::stop_codex_processes_for_app_dir_and_wait(&app_dir);
+    } else {
+        codex_plus_core::watcher::stop_codex_processes_and_wait();
+    }
 }
 
 fn spawn_codex_plus_launch(request: LaunchRequest, accepted_message: &str) -> CommandResult<Value> {

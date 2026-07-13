@@ -307,6 +307,57 @@ pub fn stop_codex_processes_and_wait() {
 #[cfg(not(windows))]
 pub fn stop_codex_processes_and_wait() {}
 
+/// Stop the exact GUI executable selected for a restart. This covers unpacked
+/// or external-drive installs whose Electron entry point is ChatGPT.exe.
+#[cfg(windows)]
+pub fn stop_codex_processes_for_app_dir_and_wait(app_dir: &Path) {
+    let processes = crate::windows_integration::enumerate_processes();
+    let process_ids = find_codex_processes_for_app_dir_from_snapshot(&processes, app_dir);
+    terminate_and_wait_for_exit(
+        process_ids,
+        RESTART_STOP_WAIT_TIMEOUT_MS,
+        RESTART_STOP_WAIT_INTERVAL_MS,
+    );
+}
+
+#[cfg(not(windows))]
+pub fn stop_codex_processes_for_app_dir_and_wait(_app_dir: &Path) {
+    stop_codex_processes_and_wait();
+}
+
+#[cfg(windows)]
+pub fn find_codex_processes_for_app_dir_from_snapshot(
+    processes: &[crate::windows_integration::WindowsProcessInfo],
+    app_dir: &Path,
+) -> Vec<u32> {
+    let expected_executable = crate::app_paths::build_codex_executable(app_dir);
+    processes
+        .iter()
+        .filter_map(|process| {
+            process
+                .executable_path
+                .as_deref()
+                .filter(|path| windows_paths_equal(path, &expected_executable))
+                .map(|_| process.process_id)
+        })
+        .collect()
+}
+
+#[cfg(windows)]
+fn windows_paths_equal(left: &Path, right: &Path) -> bool {
+    comparable_windows_path(left) == comparable_windows_path(right)
+}
+
+#[cfg(windows)]
+fn comparable_windows_path(path: &Path) -> String {
+    let rendered = path.to_string_lossy().replace('/', "\\");
+    let path = rendered
+        .strip_prefix(r"\\?\")
+        .or_else(|| rendered.strip_prefix(r"\??\"))
+        .unwrap_or(&rendered);
+    path.trim_end_matches('\\').to_ascii_lowercase()
+}
+
 #[cfg(windows)]
 fn terminate_and_wait_for_exit(process_ids: Vec<u32>, timeout_ms: u64, interval_ms: u64) {
     if process_ids.is_empty() {

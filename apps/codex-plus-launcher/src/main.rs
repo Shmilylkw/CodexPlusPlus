@@ -35,6 +35,19 @@ impl Default for LauncherHooks {
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    let result = run().await;
+    if let Err(error) = &result {
+        let _ = codex_plus_core::diagnostic_log::append_diagnostic_log(
+            "launcher.start_failed",
+            json!({
+                "message": error.to_string(),
+            }),
+        );
+    }
+    result
+}
+
+async fn run() -> Result<()> {
     let args = std::env::args().skip(1).collect::<Vec<_>>();
     let helper_only = args.iter().any(|arg| arg == "--helper-only");
     let options = parse_launch_options(args.iter());

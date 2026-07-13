@@ -1906,7 +1906,7 @@ export function App() {
               : {
                   directory: false,
                   multiple: false,
-                  title: t("选择 Codex.exe 或 Codex.app"),
+                  title: t("选择 Codex.exe、ChatGPT.exe 或 Codex.app"),
                   filters: [{ name: t("Codex 应用"), extensions: ["exe", "app"] }],
                 },
           );
@@ -3343,13 +3343,13 @@ function MaintenanceScreen({
           <Field label={t("保存的应用路径")}>
             <Input
               value={settings?.settings.codexAppPath ?? ""}
-              placeholder={t("选择 Codex.exe、Codex.app、app 目录或解包目录")}
+              placeholder={t("选择 Codex.exe、ChatGPT.exe、Codex.app、app 目录或解包目录")}
               readOnly
             />
           </Field>
           <Toolbar>
             <Button onClick={() => void actions.chooseCodexAppPath("folder")}>{t("选择应用目录")}</Button>
-            <Button variant="secondary" onClick={() => void actions.chooseCodexAppPath("file")}>{t("选择 Codex.exe")}</Button>
+            <Button variant="secondary" onClick={() => void actions.chooseCodexAppPath("file")}>{t("选择应用 exe")}</Button>
             <Button variant="secondary" onClick={() => void actions.clearCodexAppPath()}>{t("清除保存路径")}</Button>
           </Toolbar>
         </CardContent>

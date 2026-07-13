@@ -5,7 +5,10 @@ use codex_plus_core::watcher::{
 };
 
 #[cfg(windows)]
-use codex_plus_core::watcher::{WindowsProcessInfo, find_codex_processes_from_snapshot};
+use codex_plus_core::watcher::{
+    WindowsProcessInfo, find_codex_processes_for_app_dir_from_snapshot,
+    find_codex_processes_from_snapshot,
+};
 
 #[test]
 fn cdp_listening_returns_true_for_bound_loopback_port() {
@@ -222,6 +225,27 @@ fn find_codex_processes_combines_store_and_local_installs() {
     ];
 
     assert_eq!(find_codex_processes_from_snapshot(&processes), vec![11, 42]);
+}
+
+#[cfg(windows)]
+#[test]
+fn restart_target_finds_external_drive_chatgpt_gui_process() {
+    let temp = tempfile::tempdir().unwrap();
+    let app_dir = temp.path().join("Codex").join("AppxBlockMap").join("app");
+    std::fs::create_dir_all(&app_dir).unwrap();
+    let executable = app_dir.join("ChatGPT.exe");
+    std::fs::write(&executable, "").unwrap();
+    let processes = [WindowsProcessInfo {
+        process_id: 88,
+        parent_process_id: 0,
+        exe_file: "ChatGPT.exe".to_string(),
+        executable_path: Some(executable),
+    }];
+
+    assert_eq!(
+        find_codex_processes_for_app_dir_from_snapshot(&processes, &app_dir),
+        vec![88]
+    );
 }
 
 #[cfg(windows)]

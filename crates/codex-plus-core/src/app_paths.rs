@@ -29,6 +29,13 @@ const APP_PACKAGE_SPECS: &[AppPackageSpec] = &[
     },
 ];
 
+#[cfg(windows)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct AppxPackageLocation {
+    package_family_name: String,
+    install_location: PathBuf,
+}
+
 pub fn find_latest_codex_app_dir(root: &Path) -> Option<PathBuf> {
     let mut matches = std::fs::read_dir(root)
         .ok()?
@@ -62,8 +69,10 @@ pub fn find_latest_codex_app_dir_from_roots(roots: &[PathBuf]) -> Option<PathBuf
 pub fn find_latest_codex_app_dir_default() -> Option<PathBuf> {
     #[cfg(windows)]
     {
-        find_latest_codex_app_dir_from_roots(&windows_app_package_roots())
-            .or_else(find_latest_codex_app_dir_from_appx_package)
+        // Get-AppxPackage reports the registered install location even when the
+        // package is installed on a volume other than the system drive.
+        find_latest_codex_app_dir_from_appx_package()
+            .or_else(|| find_latest_codex_app_dir_from_roots(&windows_app_package_roots()))
     }
 
     #[cfg(not(windows))]
@@ -74,21 +83,49 @@ pub fn find_latest_codex_app_dir_default() -> Option<PathBuf> {
 
 #[cfg(windows)]
 fn find_latest_codex_app_dir_from_appx_package() -> Option<PathBuf> {
+    installed_codex_appx_packages()
+        .into_iter()
+        .find_map(|package| normalize_codex_app_path(&package.install_location))
+}
+
+#[cfg(windows)]
+fn installed_codex_appx_packages() -> Vec<AppxPackageLocation> {
     let output = Command::new("powershell")
         .args([
             "-NoProfile",
             "-ExecutionPolicy",
             "Bypass",
             "-Command",
-            "$names=@('OpenAI.Codex','OpenAI.CodexBeta'); Get-AppxPackage | Where-Object { $names -contains $_.Name } | Sort-Object Version -Descending | Select-Object -First 1 -ExpandProperty InstallLocation",
+            "$names=@('OpenAI.Codex','OpenAI.CodexBeta'); Get-AppxPackage | Where-Object { $names -contains $_.Name } | Sort-Object Version -Descending | ForEach-Object { $_.PackageFamilyName + [char]9 + $_.InstallLocation }",
         ])
         .output()
-        .ok()?;
+        .ok();
+    let Some(output) = output else {
+        return Vec::new();
+    };
     if !output.status.success() {
-        return None;
+        return Vec::new();
     }
-    latest_appx_install_location_from_output(&String::from_utf8_lossy(&output.stdout))
-        .and_then(|location| normalize_codex_app_path(Path::new(&location)))
+    appx_package_locations_from_output(&String::from_utf8_lossy(&output.stdout))
+}
+
+#[cfg(windows)]
+fn appx_package_locations_from_output(output: &str) -> Vec<AppxPackageLocation> {
+    output
+        .lines()
+        .filter_map(|line| {
+            let (package_family_name, install_location) = line.trim().split_once('\t')?;
+            let package_family_name = package_family_name.trim();
+            let install_location = install_location.trim();
+            if package_family_name.is_empty() || install_location.is_empty() {
+                return None;
+            }
+            Some(AppxPackageLocation {
+                package_family_name: package_family_name.to_string(),
+                install_location: PathBuf::from(install_location),
+            })
+        })
+        .collect()
 }
 
 pub fn latest_appx_install_location_from_output(output: &str) -> Option<String> {
@@ -190,7 +227,46 @@ pub fn find_standalone_codex_app_dir() -> Option<PathBuf> {
             }
         }
     }
+    #[cfg(windows)]
+    {
+        return find_running_codex_app_dir();
+    }
+
+    #[cfg(not(windows))]
+    {
+        None
+    }
+}
+
+#[cfg(windows)]
+fn find_running_codex_app_dir() -> Option<PathBuf> {
+    crate::windows_integration::enumerate_processes()
+        .iter()
+        .find_map(app_dir_from_running_codex_process)
+}
+
+#[cfg(windows)]
+fn app_dir_from_running_codex_process(
+    process: &crate::windows_integration::WindowsProcessInfo,
+) -> Option<PathBuf> {
+    let executable = process.executable_path.as_deref()?;
+    if process.exe_file == "Codex.exe"
+        || (process.exe_file.eq_ignore_ascii_case("ChatGPT.exe")
+            && executable_has_codex_path_component(executable))
+    {
+        return executable.parent().map(Path::to_path_buf);
+    }
     None
+}
+
+#[cfg(windows)]
+fn executable_has_codex_path_component(path: &Path) -> bool {
+    path.ancestors().any(|ancestor| {
+        ancestor
+            .file_name()
+            .and_then(OsStr::to_str)
+            .is_some_and(|name| name.to_ascii_lowercase().contains("codex"))
+    })
 }
 
 pub fn resolve_codex_app_dir_with_saved(
@@ -283,12 +359,59 @@ pub fn codex_app_version(app_dir: &Path) -> Option<String> {
 }
 
 pub fn packaged_app_user_model_id(app_dir: &Path) -> Option<String> {
-    let package_name = package_name_from_app_dir(app_dir)?;
-    let (spec, _, publisher_id) = codex_package_parts(&package_name)?;
-    if publisher_id.is_empty() {
-        return None;
+    if let Some(package_name) = package_name_from_app_dir(app_dir)
+        && let Some((spec, _, publisher_id)) = codex_package_parts(&package_name)
+        && !publisher_id.is_empty()
+    {
+        return Some(format!("{}_{publisher_id}!{}", spec.identity, spec.app_id));
     }
-    Some(format!("{}_{publisher_id}!{}", spec.identity, spec.app_id))
+
+    #[cfg(windows)]
+    {
+        return packaged_app_user_model_id_from_appx_registration(app_dir);
+    }
+
+    #[cfg(not(windows))]
+    {
+        None
+    }
+}
+
+#[cfg(windows)]
+fn packaged_app_user_model_id_from_appx_registration(app_dir: &Path) -> Option<String> {
+    let packages = installed_codex_appx_packages();
+    packaged_app_user_model_id_from_appx_packages(app_dir, &packages)
+}
+
+#[cfg(windows)]
+fn packaged_app_user_model_id_from_appx_packages(
+    app_dir: &Path,
+    packages: &[AppxPackageLocation],
+) -> Option<String> {
+    packages
+        .iter()
+        .find(|package| app_dir_is_within_install_location(app_dir, &package.install_location))
+        .map(|package| format!("{}!App", package.package_family_name))
+}
+
+#[cfg(windows)]
+fn app_dir_is_within_install_location(app_dir: &Path, install_location: &Path) -> bool {
+    let app_dir = comparable_windows_path(app_dir);
+    let install_location = comparable_windows_path(install_location);
+    app_dir == install_location
+        || app_dir
+            .strip_prefix(&install_location)
+            .is_some_and(|suffix| suffix.starts_with('\\'))
+}
+
+#[cfg(windows)]
+fn comparable_windows_path(path: &Path) -> String {
+    let path = path.to_string_lossy().replace('/', "\\");
+    let path = path
+        .strip_prefix(r"\\?\")
+        .or_else(|| path.strip_prefix(r"\??\"))
+        .unwrap_or(&path);
+    path.trim_end_matches('\\').to_ascii_lowercase()
 }
 
 fn package_name_from_app_dir(app_dir: &Path) -> Option<String> {
@@ -458,4 +581,38 @@ fn strip_prefix_ignore_ascii_case<'a>(value: &'a str, prefix: &str) -> Option<&'
     }
     let (head, rest) = value.split_at(prefix.len());
     head.eq_ignore_ascii_case(prefix).then_some(rest)
+}
+
+#[cfg(all(test, windows))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn appx_package_locations_keep_external_drive_registration_data() {
+        let locations = appx_package_locations_from_output(
+            "OpenAI.Codex_2p2nqsd0c76g0\tD:\\Codex\\AppxBlockMap\n",
+        );
+
+        assert_eq!(locations.len(), 1);
+        assert_eq!(
+            locations[0].package_family_name,
+            "OpenAI.Codex_2p2nqsd0c76g0"
+        );
+        assert_eq!(
+            locations[0].install_location,
+            PathBuf::from(r"D:\Codex\AppxBlockMap")
+        );
+        assert!(app_dir_is_within_install_location(
+            Path::new(r"D:\Codex\AppxBlockMap\app"),
+            &locations[0].install_location,
+        ));
+        assert_eq!(
+            packaged_app_user_model_id_from_appx_packages(
+                Path::new(r"D:\Codex\AppxBlockMap\app"),
+                &locations,
+            )
+            .as_deref(),
+            Some("OpenAI.Codex_2p2nqsd0c76g0!App")
+        );
+    }
 }

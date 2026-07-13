@@ -604,9 +604,9 @@ export const EN_PLAIN: Record<string, string> = {
   "适合纯 API；启用插件市场、会话删除导出、项目移动等全部页面能力。":
     "Suited to pure API; enables all page capabilities including plugin marketplace, session deletion/export and project move.",
   "选择 Codex 应用目录": "Select Codex app directory",
-  "选择 Codex.exe": "Select Codex.exe",
-  "选择 Codex.exe 或 Codex.app": "Select Codex.exe or Codex.app",
-  "选择 Codex.exe、Codex.app、app 目录或解包目录": "Select Codex.exe, Codex.app, the app directory or the unpacked directory",
+  "选择应用 exe": "Select app executable",
+  "选择 Codex.exe、ChatGPT.exe 或 Codex.app": "Select Codex.exe, ChatGPT.exe or Codex.app",
+  "选择 Codex.exe、ChatGPT.exe、Codex.app、app 目录或解包目录": "Select Codex.exe, ChatGPT.exe, Codex.app, the app directory or the unpacked directory",
   "选择 png / jpg / webp / gif / bmp": "Select png / jpg / webp / gif / bmp",
   "选择会话": "Select session",
   "选择图片": "Select image",
