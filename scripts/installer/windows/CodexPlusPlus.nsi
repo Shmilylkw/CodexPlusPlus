@@ -15,6 +15,9 @@ SetCompressor /SOLID lzma
 
 !define MUI_ICON "${ROOT}\apps\codex-plus-manager\src-tauri\icons\icon.ico"
 !define MUI_UNICON "${ROOT}\apps\codex-plus-manager\src-tauri\icons\icon.ico"
+!define MUI_FINISHPAGE_RUN
+!define MUI_FINISHPAGE_RUN_TEXT "立即运行 Codex++ 管理工具"
+!define MUI_FINISHPAGE_RUN_FUNCTION LaunchCodexPlusPlusManager
 
 !insertmacro MUI_PAGE_WELCOME
 !insertmacro MUI_PAGE_DIRECTORY
@@ -55,6 +58,10 @@ Section "Install"
   WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\Codex++" "InstallLocation" "$INSTDIR"
   WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\Codex++" "UninstallString" "$INSTDIR\uninstall.exe"
 SectionEnd
+
+Function LaunchCodexPlusPlusManager
+  Exec '"$INSTDIR\codex-plus-plus-manager.exe"'
+FunctionEnd
 
 Section "Uninstall"
   nsExec::ExecToLog 'taskkill /IM codex-plus-plus.exe /F'

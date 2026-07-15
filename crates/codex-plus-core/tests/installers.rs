@@ -111,6 +111,17 @@ fn macos_dmg_includes_applications_shortcut_for_drag_install() {
 }
 
 #[test]
+fn windows_installer_finish_page_can_launch_codex_plus_plus_manager() {
+    let script = std::fs::read_to_string("../../scripts/installer/windows/CodexPlusPlus.nsi")
+        .expect("read Windows installer script");
+
+    assert!(script.contains("!define MUI_FINISHPAGE_RUN"));
+    assert!(script.contains("!define MUI_FINISHPAGE_RUN_TEXT \"立即运行 Codex++ 管理工具\""));
+    assert!(script.contains("!define MUI_FINISHPAGE_RUN_FUNCTION LaunchCodexPlusPlusManager"));
+    assert!(script.contains("Exec '\"$INSTDIR\\codex-plus-plus-manager.exe\"'"));
+}
+
+#[test]
 fn companion_binary_path_resolves_macos_silent_app_next_to_manager_app() {
     let manager_exe = std::path::Path::new(
         "/Applications/Codex++ 管理工具.app/Contents/MacOS/CodexPlusPlusManager",
