@@ -5,10 +5,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
-use tauri::{Manager, WindowEvent};
+use tauri::{Emitter, Manager, WindowEvent};
 
 const TRAY_ID: &str = "codex_plus_tray";
-
 static APP_EXITING: AtomicBool = AtomicBool::new(false);
 const TRAY_MENU_SHOW: &str = "tray_show_main";
 const TRAY_MENU_DREAM_SKIN_APPLY: &str = "tray_apply_dream_skin";
@@ -147,7 +146,7 @@ pub fn run() {
             commands::apply_pure_api_injection,
             commands::clear_relay_injection,
             manager_exit_app,
-            manager_hide_to_tray,
+            manager_minimize_to_taskbar,
             update_tray_labels
         ])
         .run(tauri::generate_context!());
@@ -215,23 +214,16 @@ fn install_tray<R: tauri::Runtime>(app: &tauri::App<R>) -> tauri::Result<()> {
 }
 
 fn register_main_window_events<R: tauri::Runtime>(window: tauri::WebviewWindow<R>) {
-    let event_window = window.clone();
-    let minimized_window = event_window.clone();
-    let close_event_window = event_window.clone();
+    let close_event_window = window.clone();
 
-    event_window.on_window_event(move |event| match event {
-        WindowEvent::Resized(_) => {
-            if matches!(minimized_window.is_minimized(), Ok(true)) {
-                let _ = minimized_window.hide();
-            }
-        }
+    window.on_window_event(move |event| match event {
         WindowEvent::CloseRequested { api, .. } => {
             if APP_EXITING.load(Ordering::SeqCst) {
                 return;
             }
 
             api.prevent_close();
-            let _ = close_event_window.hide();
+            let _ = close_event_window.emit("manager://close-requested", ());
         }
         _ => {}
     });
@@ -241,11 +233,6 @@ fn register_main_window_events<R: tauri::Runtime>(window: tauri::WebviewWindow<R
 fn manager_exit_app<R: tauri::Runtime>(app: tauri::AppHandle<R>) {
     APP_EXITING.store(true, Ordering::SeqCst);
     app.exit(0);
-}
-
-#[tauri::command]
-fn manager_hide_to_tray<R: tauri::Runtime>(window: tauri::WebviewWindow<R>) {
-    let _ = window.hide();
 }
 
 #[tauri::command]
@@ -320,6 +307,11 @@ fn show_main_window<R: tauri::Runtime>(app_handle: &tauri::AppHandle<R>) {
         let _ = window.show();
         let _ = window.set_focus();
     }
+}
+
+#[tauri::command]
+fn manager_minimize_to_taskbar<R: tauri::Runtime>(window: tauri::WebviewWindow<R>) {
+    let _ = window.minimize();
 }
 
 /// Restores and focuses an existing manager window on Windows.

@@ -41,6 +41,7 @@ import {
   Play,
   MessageCircle,
   MoreHorizontal,
+  Minus,
   FileCode2,
   Moon,
   Network,
@@ -850,6 +851,7 @@ export function App() {
     cancelText: string;
     resolve: (confirmed: boolean) => void;
   } | null>(null);
+  const [closeConfirmOpen, setCloseConfirmOpen] = useState(false);
   const [sessionIndexCleanupDialog, setSessionIndexCleanupDialog] = useState<{
     candidates: SessionIndexCleanupCandidate[];
     resolve: (selectedIds: string[] | null) => void;
@@ -2298,11 +2300,13 @@ export function App() {
   };
 
   const exitManagerApp = async () => {
+    setCloseConfirmOpen(false);
     await call<void>("manager_exit_app");
   };
 
-  const hideManagerToTray = async () => {
-    await call<void>("manager_hide_to_tray");
+  const minimizeManagerToTaskbar = async () => {
+    setCloseConfirmOpen(false);
+    await call<void>("manager_minimize_to_taskbar");
   };
 
   const showResultNotice = (
@@ -2342,6 +2346,19 @@ export function App() {
         windowTitle: "Codex++ Manager",
       });
     }
+
+    let unlisten: (() => void) | undefined;
+    void listen("manager://close-requested", () => {
+      setCloseConfirmOpen(true);
+    })
+      .then((unsubscribe) => {
+        unlisten = unsubscribe;
+      })
+      .catch(() => {});
+
+    return () => {
+      unlisten?.();
+    };
   }, []);
 
   useEffect(() => {
@@ -2796,6 +2813,13 @@ export function App() {
           key={`${notice.title}-${notice.message}-${notice.status ?? ""}`}
           notice={notice}
           onClose={() => setNotice(null)}
+        />
+      ) : null}
+      {closeConfirmOpen ? (
+        <CloseConfirmDialog
+          onCancel={() => setCloseConfirmOpen(false)}
+          onExit={() => void exitManagerApp()}
+          onMinimize={() => void minimizeManagerToTaskbar()}
         />
       ) : null}
       {confirmDialog ? (
@@ -6642,6 +6666,40 @@ function ConfirmDialog({
             {confirm.confirmText}
           </Button>
           <Button onClick={onCancel} variant="secondary">{confirm.cancelText}</Button>
+        </Toolbar>
+      </div>
+    </div>
+  );
+}
+
+function CloseConfirmDialog({
+  onCancel,
+  onExit,
+  onMinimize,
+}: {
+  onCancel: () => void;
+  onExit: () => void;
+  onMinimize: () => void;
+}) {
+  return (
+    <div className="modal-backdrop" role="dialog" aria-modal="true">
+      <div className="modal-card">
+        <div className="modal-head">
+          <div>
+            <h2>{t("关闭 Codex++")}</h2>
+            <p className="modal-message">{t("关闭后，要最小化到任务栏还是退出 Codex++？")}</p>
+          </div>
+          <button className="toast-close" onClick={onCancel} type="button">×</button>
+        </div>
+        <Toolbar>
+          <Button onClick={onMinimize}>
+            <Minus className="h-4 w-4" />
+            {t("最小化到任务栏")}
+          </Button>
+          <Button onClick={onExit} variant="secondary">
+            <PowerOff className="h-4 w-4" />
+            {t("退出 Codex++")}
+          </Button>
         </Toolbar>
       </div>
     </div>

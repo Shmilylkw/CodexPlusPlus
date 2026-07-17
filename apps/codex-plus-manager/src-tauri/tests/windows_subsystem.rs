@@ -51,20 +51,26 @@ fn manager_main_window_uses_default_window_icon_explicitly() {
 }
 
 #[test]
-fn manager_close_minimizes_to_tray_without_confirmation() {
+fn manager_close_prompts_before_minimizing_to_taskbar_or_exiting() {
     let lib_rs = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/src/lib.rs"))
         .expect("read manager lib.rs");
     let manifest_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
     let app_tsx = manifest_dir.parent().unwrap().join("src/App.tsx");
     let app_tsx = std::fs::read_to_string(&app_tsx).expect("read manager App.tsx");
 
-    assert!(!lib_rs.contains("MessageDialogButtons"));
-    assert!(!lib_rs.contains(".dialog()"));
-    assert!(!lib_rs.contains("manager://close-requested"));
-    assert!(lib_rs.contains("let _ = close_event_window.hide();"));
-    assert!(!app_tsx.contains("CloseConfirmDialog"));
+    assert!(!lib_rs.contains("manager_hide_to_tray"));
+    assert!(!lib_rs.contains("window.hide()"));
+    assert!(lib_rs.contains("install_tray(app)?"));
+    assert!(lib_rs.contains("TRAY_MENU_DREAM_SKIN_APPLY"));
+    assert!(lib_rs.contains("update_tray_labels"));
+    assert!(lib_rs.contains("manager://close-requested"));
+    assert!(lib_rs.contains("fn manager_minimize_to_taskbar"));
+    assert!(lib_rs.contains("let _ = window.minimize();"));
+    assert!(app_tsx.contains("CloseConfirmDialog"));
     assert!(app_tsx.contains("manager_exit_app"));
-    assert!(app_tsx.contains("manager_hide_to_tray"));
+    assert!(app_tsx.contains("manager_minimize_to_taskbar"));
+    assert!(app_tsx.contains("最小化到任务栏"));
+    assert!(app_tsx.contains("退出 Codex++"));
 }
 
 #[test]

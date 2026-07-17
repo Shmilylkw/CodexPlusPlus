@@ -5,6 +5,23 @@
 
 // Plain strings: t("中文") -> EN_PLAIN["中文"].
 export const EN_PLAIN: Record<string, string> = {
+  "VLM 仅支持 Chat Completions 协议和聚合模式": "VLM is only supported for the Chat Completions protocol and aggregate mode",
+  "纯文本模型请配置此项": "Configure this option for text-only models",
+  "原样发送图片": "Send images as-is",
+  "为纯文本模型移除消息中的图片": "Remove images from messages for text-only models",
+  "为纯文本模型配置图片分析路由": "Configure an image analysis route for text-only models",
+  "多模态模型（支持图片输入的模型）请保持 send-as-is。": "Keep send-as-is for multimodal models that accept image input.",
+  "Vision Analysis Provider": "Vision Analysis Provider",
+  "VLM API Key": "VLM API Key",
+  "VLM Model": "VLM Model",
+  "VLM Base URL": "VLM Base URL",
+  "若开启 VLM analysis，请确认 VLM 配置项完整且服务可用。": "When VLM analysis is enabled, make sure the VLM configuration is complete and the service is available.",
+  "仅在 Chat Completion 和聚合模式生效。": "Only takes effect for Chat Completions and aggregate mode.",
+  "VLM 配置不完整：API Key、Model 和 Base URL 为必填项，否则 VLM 不会生效。": "VLM configuration is incomplete: API Key, Model, and Base URL are required for VLM to work.",
+  "关闭 Codex++": "Close Codex++",
+  "关闭后，要最小化到任务栏还是退出 Codex++？": "When closing, minimize to the taskbar or exit Codex++?",
+  "最小化到任务栏": "Minimize to taskbar",
+  "退出 Codex++": "Exit Codex++",
   "API Key 模式下扩展插件市场请求，尽量显示完整插件列表；官方/混合模式通常不需要。":
     "Expands plugin marketplace requests in API Key mode to show the full plugin list. Usually unnecessary in official/mixed mode.",
   "API Key 环境变量": "API Key environment variable",
