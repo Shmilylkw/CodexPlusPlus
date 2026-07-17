@@ -5453,7 +5453,7 @@ function RelayProfileEditor({
     const models = Array.from(new Set((upstreamModels ?? []).map((model) => model.trim()).filter(Boolean)));
     if (!models.length) return;
 
-    addModelWindowRows(models.map((model) => ({ model, window: "" })));
+    addModelWindowRows(models.map((model) => ({ model, window: "", imageHandling: "" })));
     setModelHiTestResults(
       Object.fromEntries(
         models.map((model) => [model, { status: "waiting", httpStatus: 0, durationMs: 0, message: "" }]),
