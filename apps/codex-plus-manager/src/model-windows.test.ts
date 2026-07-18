@@ -8,6 +8,7 @@ import {
   modelWindowsTextToMap,
   serializeModelWindowRows,
   mergeModelWindowRows,
+  applyImageHandlingToRows,
 } from "./model-windows.ts";
 
 // 类型检查：确保 RelayProfile 包含 modelWindows 和 modelVlm 字段
@@ -138,5 +139,24 @@ describe("model-windows helpers", () => {
         { model: "deepseek-v4-pro", window: "", imageHandling: "vlm" },
       ],
     );
+  });
+
+  it("applyImageHandlingToRows applies one mode to every row", () => {
+    const rows = [
+      { model: "a", window: "1M", imageHandling: "vlm" as const },
+      { model: "", window: "", imageHandling: "send-as-is" as const },
+      { model: "b", window: "200K", imageHandling: "strip" as const },
+    ];
+
+    assert.deepStrictEqual(applyImageHandlingToRows(rows, "strip"), [
+      { model: "a", window: "1M", imageHandling: "strip" },
+      { model: "", window: "", imageHandling: "strip" },
+      { model: "b", window: "200K", imageHandling: "strip" },
+    ]);
+    assert.deepStrictEqual(rows, [
+      { model: "a", window: "1M", imageHandling: "vlm" },
+      { model: "", window: "", imageHandling: "send-as-is" },
+      { model: "b", window: "200K", imageHandling: "strip" },
+    ]);
   });
 });

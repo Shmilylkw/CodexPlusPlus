@@ -77,10 +77,12 @@ import { Textarea } from "@/components/ui/textarea";
 import { isGitHubRepositoryHomepage } from "./github-repository";
 import { normalizeFetchedModelIds, runAllFetchedModelHiTests } from "./relay-model-hi";
 import {
+  applyImageHandlingToRows,
   mergeModelWindowRows,
   modelWindowRowsFromProfile,
   serializeModelWindowRows,
   type ImageHandling,
+  type ImageHandlingMode,
   type ModelWindowRow,
 } from "./model-windows";
 import { resolveProviderSyncCompletion } from "./provider-sync-flow";
@@ -5798,7 +5800,7 @@ function RelayProfileEditor({
             </div>
             <div className="relay-model-list-tools">
               <Button
-                onClick={() => setModelWindowRows([...modelWindowRows, { model: "", window: "", imageHandling: "" }])}
+                onClick={() => setModelWindowRows((current) => [...current, { model: "", window: "", imageHandling: "" }])}
                 size="sm"
                 type="button"
                 variant="secondary"
@@ -5825,6 +5827,33 @@ function RelayProfileEditor({
                 <Download className="h-4 w-4" />
                 {t("从上游获取")}
               </Button>
+              <select
+                aria-label={t("一键设置图片处理")}
+                className="field-select relay-model-image-batch-select"
+                disabled={vlmUnsupportedProtocol}
+                onChange={(event) => {
+                  const mode = event.currentTarget.value as ImageHandlingMode;
+                  if (!mode) return;
+                  setModelWindowRows((current) => applyImageHandlingToRows(current, mode));
+                }}
+                title={
+                  vlmUnsupportedProtocol
+                    ? t("VLM 仅支持 Chat Completions 协议和聚合模式")
+                    : t("一键设置图片处理")
+                }
+                value=""
+              >
+                <option disabled value="">{t("一键设置")}</option>
+                <option value="send-as-is" title={t("原样发送图片")}>send-as-is</option>
+                <option value="strip" title={t("为纯文本模型移除消息中的图片")}>strip images</option>
+                <option
+                  value="vlm"
+                  disabled={vlmUnsupportedProtocol}
+                  title={t("为纯文本模型配置图片分析路由")}
+                >
+                  VLM analysis
+                </option>
+              </select>
               <Button
                 disabled={modelHiTestRunning}
                 onClick={() => void runAllModelHiTests()}

@@ -27,11 +27,20 @@ export function modelWindowsTextToMap(modelList: string, modelWindowsText: strin
 /// 图片处理模式。
 export type ImageHandling = "" | "send-as-is" | "strip" | "vlm";
 
+export type ImageHandlingMode = Exclude<ImageHandling, "">;
+
 export type ModelWindowRow = {
   model: string;
   window: string;
   imageHandling: ImageHandling;
 };
+
+export function applyImageHandlingToRows(
+  rows: readonly ModelWindowRow[],
+  mode: ImageHandlingMode,
+): ModelWindowRow[] {
+  return rows.map((row) => ({ ...row, imageHandling: mode }));
+}
 
 export function mergeModelWindowRows(
   currentRows: ModelWindowRow[],

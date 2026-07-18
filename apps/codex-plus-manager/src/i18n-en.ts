@@ -235,6 +235,8 @@ export const EN_PLAIN: Record<string, string> = {
   "供应商切换不可用": "Provider switching unavailable",
   "供应商切换中": "Switching provider",
   "一键测速": "Test all latencies",
+  "一键设置": "Quick set",
+  "一键设置图片处理": "Quickly set image handling",
   "供应商列表": "Provider list",
   "供应商测试": "Provider test",
   "供应商测试模型": "Provider test model",
