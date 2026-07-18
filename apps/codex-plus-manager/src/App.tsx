@@ -5463,6 +5463,7 @@ function RelayProfileEditor({
   const [modelHiTestRunning, setModelHiTestRunning] = useState(false);
   const modelHiTestRunningRef = useRef(false);
   const [modelHiTestResults, setModelHiTestResults] = useState<Record<string, ModelHiTestResult>>({});
+  const [bulkImageHandling, setBulkImageHandling] = useState<ImageHandlingMode | "">("");
   // 纯 Responses 模式（非聚合）下 VLM/Strip 不生效，禁用下拉
   const vlmUnsupportedProtocol = profile.protocol === "responses" && !isAggregateRelayProfile(profile);
   if (isAggregateRelayProfile(profile)) {
@@ -5833,6 +5834,7 @@ function RelayProfileEditor({
                 disabled={vlmUnsupportedProtocol}
                 onChange={(event) => {
                   const mode = event.currentTarget.value as ImageHandlingMode;
+                  setBulkImageHandling(mode);
                   if (!mode) return;
                   setModelWindowRows((current) => applyImageHandlingToRows(current, mode));
                 }}
@@ -5841,9 +5843,9 @@ function RelayProfileEditor({
                     ? t("VLM 仅支持 Chat Completions 协议和聚合模式")
                     : t("一键设置图片处理")
                 }
-                value=""
+                value={bulkImageHandling}
               >
-                <option disabled value="">{t("一键设置")}</option>
+                <option value="">{t("一键设置")}</option>
                 <option value="send-as-is" title={t("原样发送图片")}>send-as-is</option>
                 <option value="strip" title={t("为纯文本模型移除消息中的图片")}>strip images</option>
                 <option
