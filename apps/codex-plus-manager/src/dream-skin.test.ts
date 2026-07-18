@@ -18,6 +18,9 @@ describe("dream skin theme helpers", () => {
     assert.equal(theme.stylePreset, undefined);
     assert.equal(theme.brandSubtitle, "CODEX DREAM SKIN");
     assert.equal(theme.colors!.accent, "#E25563");
+    assert.equal(theme.promoTitle, undefined);
+    assert.equal(theme.promoSub, undefined);
+    assert.equal(theme.promoUrl, undefined);
   });
 
   it("restores an invalid color without dropping valid text", () => {
@@ -78,6 +81,9 @@ describe("dream skin theme helpers", () => {
     assert.deepEqual(theme.art, { focusX: 0.72, focusY: 0.45, safeArea: "left", taskMode: "ambient" });
     assert.deepEqual(theme.palette, { accent: "#123456", custom: "keep" });
     assert.deepEqual(theme.customTargetField, { nested: true });
+    assert.equal(theme.promoTitle, undefined);
+    assert.equal(theme.promoSub, undefined);
+    assert.equal(theme.promoUrl, undefined);
   });
 
   it("detects text, color, and image draft changes", () => {

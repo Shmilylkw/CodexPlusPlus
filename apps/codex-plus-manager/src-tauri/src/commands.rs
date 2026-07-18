@@ -3357,10 +3357,10 @@ pub fn apply_relay_injection() -> CommandResult<RelayPayload> {
         );
     }
     prepare_codex_app_state_before_provider_switch(&home, "manager.apply_relay_injection.before");
-    let relay = settings.active_relay_profile();
+    let relay = settings.active_relay_profile_with_aggregate_models();
     log_relay_apply_request("manager.apply_relay_injection", &settings, &relay);
-    if settings.active_aggregate_relay_profile().is_some() {
-        let response = apply_aggregate_relay_injection_to_home(&home);
+    if relay.relay_mode == codex_plus_core::settings::RelayMode::Aggregate {
+        let response = apply_aggregate_relay_injection_to_home(&home, &settings, &relay);
         if response.status == "ok" {
             finish_codex_app_state_after_provider_switch(
                 &home,
@@ -3469,18 +3469,35 @@ pub fn apply_relay_injection() -> CommandResult<RelayPayload> {
     }
 }
 
-fn apply_aggregate_relay_injection_to_home(home: &Path) -> CommandResult<RelayPayload> {
-    match codex_plus_core::relay_config::apply_relay_config_to_home_with_protocol(
+fn apply_aggregate_relay_injection_to_home(
+    home: &Path,
+    settings: &BackendSettings,
+    relay: &RelayProfile,
+) -> CommandResult<RelayPayload> {
+    if let Err(error) =
+        codex_plus_core::relay_rotation::RelayRotationSelector::from_settings(settings)
+    {
+        let status = codex_plus_core::relay_config::relay_status_from_home(home);
+        return failed(
+            &format!("聚合供应商配置无效：{error}"),
+            relay_payload(status, None),
+        );
+    }
+    match codex_plus_core::relay_config::apply_relay_profile_to_home_with_switch_rules_and_computer_use_guard(
         home,
-        &codex_plus_core::protocol_proxy::local_responses_proxy_base_url(
-            codex_plus_core::protocol_proxy::DEFAULT_PROTOCOL_PROXY_PORT,
-        ),
-        "codex-plus-aggregate",
-        codex_plus_core::settings::RelayProtocol::Responses,
-        codex_plus_core::protocol_proxy::DEFAULT_PROTOCOL_PROXY_PORT,
+        relay,
+        &relay_combined_common_config(settings),
+        settings.computer_use_guard_enabled,
     ) {
         Ok(result) => {
             let status = codex_plus_core::relay_config::relay_status_from_home(home);
+            log_relay_apply_result(
+                "manager.apply_relay_injection.ok",
+                relay,
+                &status,
+                result.backup_path.as_ref(),
+                None,
+            );
             ok(
                 "聚合供应商配置已写入，真实请求会由本地代理按策略轮转。",
                 relay_payload(status, result.backup_path),
@@ -3488,6 +3505,13 @@ fn apply_aggregate_relay_injection_to_home(home: &Path) -> CommandResult<RelayPa
         }
         Err(error) => {
             let status = codex_plus_core::relay_config::relay_status_from_home(home);
+            log_relay_apply_result(
+                "manager.apply_relay_injection.failed",
+                relay,
+                &status,
+                None,
+                Some(error.to_string()),
+            );
             failed(
                 &format!("写入聚合供应商配置失败：{error}"),
                 relay_payload(status, None),
@@ -4558,17 +4582,82 @@ mod tests {
     }
 
     #[test]
-    fn aggregate_relay_injection_writes_local_proxy_without_chatgpt_auth() {
-        let temp = tempfile::tempdir().unwrap();
+    fn aggregate_relay_injection_uses_member_model_intersection_for_catalog() {
+        use codex_plus_core::settings::{
+            AggregateRelayMember, AggregateRelayProfile, AggregateRelayStrategy, RelayMode,
+        };
 
-        let result = apply_aggregate_relay_injection_to_home(temp.path());
+        let temp = tempfile::tempdir().unwrap();
+        let relay_a = RelayProfile {
+            id: "relay-a".to_string(),
+            relay_mode: RelayMode::PureApi,
+            base_url: "https://a.example/v1".to_string(),
+            api_key: "sk-a".to_string(),
+            model: "shared-model".to_string(),
+            model_list: "shared-model\nonly-a".to_string(),
+            model_windows: r#"{"shared-model":"1M","only-a":"1M"}"#.to_string(),
+            ..RelayProfile::default()
+        };
+        let relay_b = RelayProfile {
+            id: "relay-b".to_string(),
+            relay_mode: RelayMode::PureApi,
+            base_url: "https://b.example/v1".to_string(),
+            api_key: "sk-b".to_string(),
+            model: "shared-model".to_string(),
+            model_list: "shared-model\nonly-b".to_string(),
+            model_windows: r#"{"shared-model":"200K","only-b":"200K"}"#.to_string(),
+            ..RelayProfile::default()
+        };
+        let aggregate = RelayProfile {
+            id: "agg".to_string(),
+            name: "Aggregate".to_string(),
+            relay_mode: RelayMode::Aggregate,
+            ..RelayProfile::default()
+        };
+        let settings = BackendSettings {
+            active_relay_id: "agg".to_string(),
+            relay_profiles: vec![relay_a, relay_b, aggregate],
+            aggregate_relay_profiles: vec![AggregateRelayProfile {
+                id: "agg".to_string(),
+                name: "Aggregate".to_string(),
+                strategy: AggregateRelayStrategy::Failover,
+                members: vec![
+                    AggregateRelayMember {
+                        relay_id: "relay-a".to_string(),
+                        weight: 1,
+                    },
+                    AggregateRelayMember {
+                        relay_id: "relay-b".to_string(),
+                        weight: 1,
+                    },
+                ],
+            }],
+            active_aggregate_relay_id: "agg".to_string(),
+            ..BackendSettings::default()
+        };
+        let relay = settings.active_relay_profile_with_aggregate_models();
+
+        assert_eq!(relay.model_list, "shared-model");
+
+        let result = apply_aggregate_relay_injection_to_home(temp.path(), &settings, &relay);
         let config = std::fs::read_to_string(temp.path().join("config.toml")).unwrap();
 
         assert_eq!(result.status, "ok");
         assert!(result.payload.configured);
-        assert!(!result.payload.authenticated);
+        assert!(config.contains(r#"model = "shared-model""#));
         assert!(config.contains(r#"base_url = "http://127.0.0.1:57321/v1""#));
         assert!(config.contains(r#"experimental_bearer_token = "codex-plus-aggregate""#));
+        assert!(config.contains(r#"model_catalog_json = "model-catalogs/agg.json""#));
+        let catalog =
+            std::fs::read_to_string(temp.path().join("model-catalogs").join("agg.json")).unwrap();
+        assert!(catalog.contains(r#""slug": "shared-model""#));
+        assert!(catalog.contains(r#""context_window": 200000"#));
+        assert!(!catalog.contains("only-a"));
+        assert!(!catalog.contains("only-b"));
+        let auth: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(temp.path().join("auth.json")).unwrap())
+                .unwrap();
+        assert_eq!(auth["OPENAI_API_KEY"], "codex-plus-aggregate");
     }
 
     #[test]

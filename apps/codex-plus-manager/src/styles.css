@@ -718,7 +718,7 @@ body {
 
 .relay-profile-card {
   display: grid;
-  grid-template-columns: 32px 32px minmax(0, 1fr) auto;
+  grid-template-columns: 32px 32px minmax(0, 1fr) 84px auto;
   gap: 10px;
   align-items: center;
   width: 100%;
@@ -3089,6 +3089,11 @@ body {
 
   .relay-profile-card {
     grid-template-columns: 18px 32px minmax(0, 1fr);
+  }
+
+  .relay-latency {
+    grid-column: 3;
+    justify-self: start;
   }
 
   .env-conflict-notice {

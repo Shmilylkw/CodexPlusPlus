@@ -75,6 +75,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { isGitHubRepositoryHomepage } from "./github-repository";
+import { normalizeFetchedModelIds, runAllFetchedModelHiTests } from "./relay-model-hi";
 import {
   mergeModelWindowRows,
   modelWindowRowsFromProfile,
@@ -731,7 +732,6 @@ type StartupResult = CommandResult<{
   showUpdate: boolean;
 }>;
 
-type Route = "overview" | "relay" | "relayEnvironment" | "sessions" | "context" | "enhance" | "dreamSkin" | "zedRemote" | "userScripts" | "recommendations" | "maintenance" | "about" | "settings";
 type Route = "overview" | "relay" | "relayEnvironment" | "sessions" | "context" | "enhance" | "dreamSkin" | "zedRemote" | "userScripts" | "maintenance" | "about" | "settings";
 type Theme = "dark" | "light";
 
@@ -2309,6 +2309,11 @@ export function App() {
     await call<void>("manager_minimize_to_taskbar");
   };
 
+  const runCloseChoiceAfterDreamSkinDraftGuard = (action: () => Promise<void>) => {
+    setCloseConfirmOpen(false);
+    runAfterDreamSkinDraftGuard(() => void action());
+  };
+
   const showResultNotice = (
     title: string,
     result: Pick<CommandResult<unknown>, "message" | "status">,
@@ -2347,16 +2352,29 @@ export function App() {
       });
     }
 
+    let disposed = false;
     let unlisten: (() => void) | undefined;
+    const consumePendingCloseRequest = async () => {
+      try {
+        const pending = await invoke<boolean>("manager_take_close_request");
+        if (!disposed && pending) setCloseConfirmOpen(true);
+      } catch {}
+    };
     void listen("manager://close-requested", () => {
-      setCloseConfirmOpen(true);
+      void consumePendingCloseRequest();
     })
       .then((unsubscribe) => {
+        if (disposed) {
+          unsubscribe();
+          return;
+        }
         unlisten = unsubscribe;
+        void consumePendingCloseRequest();
       })
       .catch(() => {});
 
     return () => {
+      disposed = true;
       unlisten?.();
     };
   }, []);
@@ -2818,8 +2836,12 @@ export function App() {
       {closeConfirmOpen ? (
         <CloseConfirmDialog
           onCancel={() => setCloseConfirmOpen(false)}
-          onExit={() => void exitManagerApp()}
-          onMinimize={() => void minimizeManagerToTaskbar()}
+          onExit={() => {
+            runCloseChoiceAfterDreamSkinDraftGuard(exitManagerApp);
+          }}
+          onMinimize={() => {
+            runCloseChoiceAfterDreamSkinDraftGuard(minimizeManagerToTaskbar);
+          }}
         />
       ) : null}
       {confirmDialog ? (
@@ -3224,7 +3246,7 @@ function RelayScreen({
             />
             <span>
               <strong>{t("启用供应商配置切换")}</strong>
-              <small>{t("关闭后本工具不会在手动切换时写入 Codex 的 config.toml / auth.json；启动 Codex 时始终不会自动改这些文件。")}</small>
+              <small>{t("关闭后本工具不会在手动切换时写入 Codex 的 config.toml / auth.json；启动 Codex 时也不会自动应用当前供应商。")}</small>
             </span>
             <ToggleVisual />
           </label>
@@ -5428,13 +5450,16 @@ function RelayProfileEditor({
   onSwitch: () => void;
   actions: Actions;
   modelWindowRows: ModelWindowRow[];
-  setModelWindowRows: (value: ModelWindowRow[]) => void;
+  setModelWindowRows: (
+    value: ModelWindowRow[] | ((current: ModelWindowRow[]) => ModelWindowRow[]),
+  ) => void;
 }) {
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [doctorResult, setDoctorResult] = useState<ProviderDoctorResult | null>(null);
   const [doctorOpen, setDoctorOpen] = useState(false);
   const [doctorRunning, setDoctorRunning] = useState(false);
   const [modelHiTestRunning, setModelHiTestRunning] = useState(false);
+  const modelHiTestRunningRef = useRef(false);
   const [modelHiTestResults, setModelHiTestResults] = useState<Record<string, ModelHiTestResult>>({});
   // 纯 Responses 模式（非聚合）下 VLM/Strip 不生效，禁用下拉
   const vlmUnsupportedProtocol = profile.protocol === "responses" && !isAggregateRelayProfile(profile);
@@ -5463,59 +5488,77 @@ function RelayProfileEditor({
     setModelWindowRows(nextRows.length ? nextRows : [{ model: "", window: "", imageHandling: "" }]);
   };
   const addModelWindowRows = (rows: ModelWindowRow[]) => {
-    setModelWindowRows(mergeModelWindowRows(modelWindowRows, rows));
+    setModelWindowRows((current) => mergeModelWindowRows(current, rows));
   };
   const runAllModelHiTests = async () => {
-    if (modelHiTestRunning) return;
-    const serializedRows = serializeModelWindowRows(modelWindowRows);
-    const testProfile = deriveRelayProfileFromFiles({
-      ...profile,
-      modelList: serializedRows.modelList,
-      modelWindows: serializedRows.modelWindows,
-    });
-    const upstreamModels = await actions.fetchRelayProfileModels(testProfile);
-    const models = Array.from(new Set((upstreamModels ?? []).map((model) => model.trim()).filter(Boolean)));
-    if (!models.length) return;
-
-    addModelWindowRows(models.map((model) => ({ model, window: "", imageHandling: "" })));
-    setModelHiTestResults(
-      Object.fromEntries(
-        models.map((model) => [model, { status: "waiting", httpStatus: 0, durationMs: 0, message: "" }]),
-      ),
-    );
+    if (modelHiTestRunningRef.current) return;
+    modelHiTestRunningRef.current = true;
     setModelHiTestRunning(true);
+    setModelHiTestResults({});
     let succeeded = 0;
     let failed = 0;
     try {
-      for (const model of models) {
-        setModelHiTestResults((current) => ({
-          ...current,
-          [model]: { status: "running", httpStatus: 0, durationMs: 0, message: "" },
-        }));
-        const startedAt = performance.now();
-        const result = await actions.testRelayProfile({ ...testProfile, testModel: model }, true);
-        const durationMs = Math.max(1, Math.round(performance.now() - startedAt));
-        const passed = !!result && isSuccessStatus(result.status) && result.httpStatus < 400;
-        if (passed) succeeded += 1;
-        else failed += 1;
-        setModelHiTestResults((current) => ({
-          ...current,
-          [model]: {
-            status: passed ? "ok" : "failed",
-            httpStatus: result?.httpStatus ?? 0,
-            durationMs,
-            message: result?.message ?? t("测试请求失败。"),
+      const serializedRows = serializeModelWindowRows(modelWindowRows);
+      const testProfile = deriveRelayProfileFromFiles({
+        ...profile,
+        modelList: serializedRows.modelList,
+        modelWindows: serializedRows.modelWindows,
+      });
+      const upstreamModels = await actions.fetchRelayProfileModels(testProfile);
+      const models = normalizeFetchedModelIds(upstreamModels ?? []);
+      if (!models.length) return;
+
+      addModelWindowRows(models.map((model) => ({ model, window: "", imageHandling: "" })));
+      setModelHiTestResults(
+        Object.fromEntries(
+          models.map((model) => [model, { status: "waiting", httpStatus: 0, durationMs: 0, message: "" }]),
+        ),
+      );
+      const startedAtByModel = new Map<string, number>();
+      await runAllFetchedModelHiTests(
+        models,
+        (model) => actions.testRelayProfile({ ...testProfile, testModel: model }, true),
+        {
+          onStart: (model) => {
+            startedAtByModel.set(model, performance.now());
+            setModelHiTestResults((current) => ({
+              ...current,
+              [model]: { status: "running", httpStatus: 0, durationMs: 0, message: "" },
+            }));
           },
-        }));
-      }
+          onSettled: (outcome) => {
+            const durationMs = Math.max(
+              1,
+              Math.round(performance.now() - (startedAtByModel.get(outcome.model) ?? performance.now())),
+            );
+            const result = outcome.status === "fulfilled" ? outcome.value : null;
+            const passed = !!result && isSuccessStatus(result.status) && result.httpStatus < 400;
+            if (passed) succeeded += 1;
+            else failed += 1;
+            setModelHiTestResults((current) => ({
+              ...current,
+              [outcome.model]: {
+                status: passed ? "ok" : "failed",
+                httpStatus: result?.httpStatus ?? 0,
+                durationMs,
+                message:
+                  outcome.status === "rejected"
+                    ? stringifyError(outcome.reason)
+                    : result?.message ?? t("测试请求失败。"),
+              },
+            }));
+          },
+        },
+      );
+      await actions.showMessage(
+        t("批量模型测试"),
+        tf("模型测试完成：成功 {0} 个，失败 {1} 个。", [succeeded, failed]),
+        failed ? "failed" : "ok",
+      );
     } finally {
+      modelHiTestRunningRef.current = false;
       setModelHiTestRunning(false);
     }
-    await actions.showMessage(
-      t("批量模型测试"),
-      tf("模型测试完成：成功 {0} 个，失败 {1} 个。", [succeeded, failed]),
-      failed ? "failed" : "ok",
-    );
   };
   const runProviderDoctor = async () => {
     setDoctorOpen(true);
@@ -7854,7 +7897,7 @@ function maskSecret(value: string): string {
 
 function relayProfileConfigBrief(profile: RelayProfile): string {
   if (isAggregateRelayProfile(profile)) {
-    const aggregate = normalizeAggregateConfig(profile.aggregate, []);
+    const aggregate = normalizeAggregateConfig(profile.aggregate);
     return tf("{0} · {1} 个成员", [aggregateStrategyLabel(aggregate.strategy), aggregate.members.length]);
   }
   if (profile.relayMode === "official") return profile.officialMixApiKey ? t("混入 API Key") : t("不写 API 文件");
@@ -7888,7 +7931,7 @@ function relayProfileModeHelp(profile: RelayProfile): string {
 
 function relayProfileReadinessText(profile: RelayProfile, relay: RelayResult | null): string {
   if (isAggregateRelayProfile(profile)) {
-    const aggregate = normalizeAggregateConfig(profile.aggregate, []);
+    const aggregate = normalizeAggregateConfig(profile.aggregate);
     return tf("聚合供应商已配置为{0}，包含 {1} 个成员；真实对话会走本地代理轮转。", [aggregateStrategyLabel(aggregate.strategy), aggregate.members.length]);
   }
   if (profile.relayMode === "official") {
@@ -7932,7 +7975,7 @@ function relayProfileModeSwitchedText(profile: RelayProfile): string {
 
 function withGeneratedRelayFiles(profile: RelayProfile): RelayProfile {
   if (isAggregateRelayProfile(profile)) {
-    return { ...profile, configContents: "", authContents: "", aggregate: normalizeAggregateConfig(profile.aggregate, []) };
+    return { ...profile, configContents: "", authContents: "", aggregate: normalizeAggregateConfig(profile.aggregate) };
   }
   if (profile.relayMode === "official") {
     return {
@@ -8516,8 +8559,8 @@ function removeRelayProfile(settings: BackendSettings, id: string): BackendSetti
           {
             ...profile,
             aggregate: {
-              ...normalizeAggregateConfig(profile.aggregate, []),
-              members: normalizeAggregateConfig(profile.aggregate, []).members.filter((member) => member.profileId !== id),
+              ...normalizeAggregateConfig(profile.aggregate),
+              members: normalizeAggregateConfig(profile.aggregate).members.filter((member) => member.profileId !== id),
             },
           },
           { ...settings, relayProfiles: profiles },
@@ -8559,7 +8602,7 @@ function isAggregateRelayProfile(profile: Pick<RelayProfile, "relayMode" | "aggr
 }
 
 function normalizeAggregateRelayProfile(profile: RelayProfile, settings: BackendSettings | null): RelayProfile {
-  const candidates = settings ? aggregateMemberCandidates(settings, profile.id) : [];
+  const candidates = settings ? aggregateMemberCandidates(settings, profile.id) : undefined;
   const aggregate = normalizeAggregateConfig(profile.aggregate, candidates);
   return {
     ...profile,
@@ -8664,9 +8707,9 @@ function parseWindowValue(value: string): number {
 
 function normalizeAggregateConfig(
   aggregate: RelayAggregateConfig | null | undefined,
-  candidates: RelayProfile[],
+  candidates?: RelayProfile[],
 ): RelayAggregateConfig {
-  const candidateIds = new Set(candidates.map((profile) => profile.id));
+  const candidateIds = candidates ? new Set(candidates.map((profile) => profile.id)) : null;
   const seen = new Set<string>();
   const strategy: RelayAggregateStrategy =
     aggregate?.strategy && aggregateStrategyOptions.some((option) => option.value === aggregate.strategy)
@@ -8674,7 +8717,7 @@ function normalizeAggregateConfig(
       : "failover";
   const members = (aggregate?.members ?? [])
     .filter((member) => member.profileId && !seen.has(member.profileId))
-    .filter((member) => !candidateIds.size || candidateIds.has(member.profileId))
+    .filter((member) => !candidateIds || candidateIds.has(member.profileId))
     .map((member) => {
       seen.add(member.profileId);
       return { profileId: member.profileId, weight: clampAggregateWeight(member.weight) };
@@ -8709,7 +8752,7 @@ function aggregateStrategyHelp(strategy: RelayAggregateStrategy): string {
 }
 
 function aggregateRelayProfileValidation(profile: RelayProfile): string | null {
-  const aggregate = normalizeAggregateConfig(profile.aggregate, []);
+  const aggregate = normalizeAggregateConfig(profile.aggregate);
   return aggregate.members.length >= 1 ? null : t("聚合供应商至少需要勾选 1 个已填写 Base URL / Key 的 API 供应商。");
 }
 

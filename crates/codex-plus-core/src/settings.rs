@@ -282,18 +282,6 @@ impl Default for DreamSkinThemeConfig {
                 "image".to_string(),
                 Value::String("portal-hero.png".to_string()),
             );
-            extra_fields.insert(
-                "promoTitle".to_string(),
-                Value::String("感谢 Passion8 赞助".to_string()),
-            );
-            extra_fields.insert(
-                "promoSub".to_string(),
-                Value::String("passion8.cc".to_string()),
-            );
-            extra_fields.insert(
-                "promoUrl".to_string(),
-                Value::String("https://passion8.cc/register?aff=TuPe".to_string()),
-            );
         }
         Self {
             schema_version: default_dream_skin_schema_version(),
@@ -671,51 +659,23 @@ impl BackendSettings {
     }
 
     pub fn active_aggregate_relay_profile(&self) -> Option<AggregateRelayProfile> {
-        let active_relay = self
-            .relay_profiles
-            .iter()
-            .find(|profile| profile.id == self.active_relay_id)?;
-        if active_relay.relay_mode != RelayMode::Aggregate {
-            return None;
-        }
-
-        let active_aggregate_id = if self.active_aggregate_relay_id.trim().is_empty() {
-            active_relay.id.as_str()
-        } else {
-            self.active_aggregate_relay_id.trim()
-        };
-
-        if active_aggregate_id != active_relay.id {
-            return None;
-        }
-
-        self.aggregate_relay_profiles
-            .iter()
-            .find(|profile| profile.id == active_aggregate_id)
-            .cloned()
+        self.active_aggregate_relay_profile_for_id(&self.active_relay_id)
     }
 
     pub fn active_aggregate_relay_profile_for_id(
         &self,
         relay_id: &str,
     ) -> Option<AggregateRelayProfile> {
-        let active_relay = self
+        let relay = self
             .relay_profiles
             .iter()
             .find(|profile| profile.id == relay_id)?;
-        if active_relay.relay_mode != RelayMode::Aggregate {
+        if relay.relay_mode != RelayMode::Aggregate {
             return None;
         }
-        let aggregate_id = if self.active_aggregate_relay_id.trim().is_empty()
-            || self.active_aggregate_relay_id.trim() != active_relay.id
-        {
-            active_relay.id.as_str()
-        } else {
-            self.active_aggregate_relay_id.trim()
-        };
         self.aggregate_relay_profiles
             .iter()
-            .find(|profile| profile.id == aggregate_id)
+            .find(|profile| profile.id == relay.id)
             .cloned()
     }
 
@@ -825,7 +785,7 @@ fn parse_window_value(token: &str) -> Option<u64> {
         .trim()
         .parse::<u64>()
         .ok()
-        .map(|value| value * multiplier)
+        .and_then(|value| value.checked_mul(multiplier))
 }
 
 pub fn default_stepwise_api_key_env() -> String {
@@ -1557,12 +1517,19 @@ fn normalize_settings_config_sections(mut settings: BackendSettings) -> BackendS
     for profile in &mut settings.relay_profiles {
         let _ = crate::relay_config::normalize_relay_profile_for_storage(profile);
     }
+    normalize_aggregate_relay_settings(&mut settings);
     settings.codex_app_image_overlay_opacity =
         clamp_image_overlay_opacity(settings.codex_app_image_overlay_opacity);
     settings.codex_app_image_overlay_fit_mode =
         normalize_image_overlay_fit_mode(&settings.codex_app_image_overlay_fit_mode);
     settings.codex_app_dream_skin_theme =
         normalize_dream_skin_theme(&settings.codex_app_dream_skin_theme);
+    for key in ["promoTitle", "promoSub", "promoUrl"] {
+        settings
+            .codex_app_dream_skin_theme_config
+            .extra_fields
+            .remove(key);
+    }
     if settings.codex_app_dream_skin_theme_config == DreamSkinThemeConfig::default()
         && settings.codex_app_dream_skin_theme != default_dream_skin_theme()
     {
@@ -1592,6 +1559,42 @@ fn normalize_settings_config_sections(mut settings: BackendSettings) -> BackendS
     settings.codex_app_stepwise_timeout_ms =
         clamp_stepwise_timeout_ms(settings.codex_app_stepwise_timeout_ms);
     settings
+}
+
+fn normalize_aggregate_relay_settings(settings: &mut BackendSettings) {
+    let aggregate_ids = settings
+        .relay_profiles
+        .iter()
+        .filter(|profile| profile.relay_mode == RelayMode::Aggregate)
+        .map(|profile| profile.id.clone())
+        .collect::<HashSet<_>>();
+    let member_ids = settings
+        .relay_profiles
+        .iter()
+        .filter(|profile| profile.relay_mode != RelayMode::Aggregate)
+        .map(|profile| profile.id.clone())
+        .collect::<HashSet<_>>();
+
+    settings
+        .aggregate_relay_profiles
+        .retain(|aggregate| aggregate_ids.contains(&aggregate.id));
+    for aggregate in &mut settings.aggregate_relay_profiles {
+        let mut seen = HashSet::new();
+        aggregate.members.retain(|member| {
+            member_ids.contains(&member.relay_id) && seen.insert(member.relay_id.clone())
+        });
+    }
+
+    settings.active_aggregate_relay_id = if aggregate_ids.contains(&settings.active_relay_id)
+        && settings
+            .aggregate_relay_profiles
+            .iter()
+            .any(|aggregate| aggregate.id == settings.active_relay_id)
+    {
+        settings.active_relay_id.clone()
+    } else {
+        String::new()
+    };
 }
 
 fn split_context_config_sections(config: &str) -> (String, String) {
@@ -2278,6 +2281,91 @@ experimental_bearer_token = "sk-existing""#
         assert_eq!(active_aggregate.members[1].relay_id, "relay-b");
         assert_eq!(active_aggregate.members[1].weight, 3);
         assert!(loaded.active_relay_uses_protocol_proxy());
+    }
+
+    #[test]
+    fn settings_store_normalizes_stale_aggregate_ids_and_members() {
+        let dir = temp_dir();
+        let store = SettingsStore::new(dir.join("settings.json"));
+        let settings = BackendSettings {
+            relay_profiles: vec![
+                RelayProfile {
+                    id: "relay-a".to_string(),
+                    name: "中转 A".to_string(),
+                    ..RelayProfile::default()
+                },
+                RelayProfile {
+                    id: "agg".to_string(),
+                    name: "聚合".to_string(),
+                    relay_mode: RelayMode::Aggregate,
+                    ..RelayProfile::default()
+                },
+            ],
+            active_relay_id: "agg".to_string(),
+            aggregate_relay_profiles: vec![
+                AggregateRelayProfile {
+                    id: "agg".to_string(),
+                    name: "聚合".to_string(),
+                    strategy: AggregateRelayStrategy::Failover,
+                    members: vec![
+                        AggregateRelayMember {
+                            relay_id: "relay-a".to_string(),
+                            weight: 1,
+                        },
+                        AggregateRelayMember {
+                            relay_id: "missing".to_string(),
+                            weight: 1,
+                        },
+                        AggregateRelayMember {
+                            relay_id: "relay-a".to_string(),
+                            weight: 2,
+                        },
+                    ],
+                },
+                AggregateRelayProfile {
+                    id: "removed-aggregate".to_string(),
+                    name: "已删除聚合".to_string(),
+                    strategy: AggregateRelayStrategy::Failover,
+                    members: Vec::new(),
+                },
+            ],
+            active_aggregate_relay_id: "stale-id".to_string(),
+            ..BackendSettings::default()
+        };
+
+        store.save(&settings).unwrap();
+
+        let loaded = store.load().unwrap();
+        assert_eq!(loaded.active_aggregate_relay_id, "agg");
+        assert!(loaded.active_relay_uses_protocol_proxy());
+        assert_eq!(loaded.aggregate_relay_profiles.len(), 1);
+        assert_eq!(loaded.aggregate_relay_profiles[0].members.len(), 1);
+        assert_eq!(
+            loaded.aggregate_relay_profiles[0].members[0].relay_id,
+            "relay-a"
+        );
+    }
+
+    #[test]
+    fn settings_store_clears_stale_active_aggregate_id_for_regular_relay() {
+        let dir = temp_dir();
+        let store = SettingsStore::new(dir.join("settings.json"));
+        let settings = BackendSettings {
+            relay_profiles: vec![RelayProfile {
+                id: "relay-a".to_string(),
+                name: "中转 A".to_string(),
+                ..RelayProfile::default()
+            }],
+            active_relay_id: "relay-a".to_string(),
+            active_aggregate_relay_id: "stale-id".to_string(),
+            ..BackendSettings::default()
+        };
+
+        store.save(&settings).unwrap();
+
+        let loaded = store.load().unwrap();
+        assert!(loaded.active_aggregate_relay_id.is_empty());
+        assert!(loaded.active_aggregate_relay_profile().is_none());
     }
 
     #[test]

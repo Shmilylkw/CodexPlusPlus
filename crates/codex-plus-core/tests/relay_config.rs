@@ -398,6 +398,11 @@ base_url = "https://responses.example.test/v1"
 #[test]
 fn apply_aggregate_relay_points_codex_to_local_responses_proxy_without_snapshot() {
     let temp = tempfile::tempdir().unwrap();
+    std::fs::write(
+        temp.path().join("auth.json"),
+        r#"{"auth_mode":"chatgpt","access_token":"preserve-me"}"#,
+    )
+    .unwrap();
     let profile = RelayProfile {
         id: "agg".to_string(),
         name: "聚合供应商 1".to_string(),
@@ -418,6 +423,8 @@ fn apply_aggregate_relay_points_codex_to_local_responses_proxy_without_snapshot(
     assert!(updated.contains(r#"base_url = "http://127.0.0.1:57321/v1""#));
     assert!(updated.contains(r#"experimental_bearer_token = "codex-plus-aggregate""#));
     assert_eq!(auth["OPENAI_API_KEY"], "codex-plus-aggregate");
+    assert_eq!(auth["auth_mode"], "chatgpt");
+    assert_eq!(auth["access_token"], "preserve-me");
 }
 
 #[test]
@@ -1829,6 +1836,42 @@ fn backfill_relay_profile_reads_live_files_and_model() {
             .contains(r#"model_provider = "live""#)
     );
     assert_eq!(profile.auth_contents, r#"{"OPENAI_API_KEY":"sk-live"}"#);
+}
+
+#[test]
+fn backfill_aggregate_profile_ignores_local_proxy_live_files() {
+    let temp = tempfile::tempdir().unwrap();
+    std::fs::write(
+        temp.path().join("config.toml"),
+        r#"model_provider = "custom"
+
+[model_providers.custom]
+base_url = "http://127.0.0.1:57321/v1"
+experimental_bearer_token = "codex-plus-aggregate"
+"#,
+    )
+    .unwrap();
+    std::fs::write(
+        temp.path().join("auth.json"),
+        r#"{"OPENAI_API_KEY":"codex-plus-aggregate"}"#,
+    )
+    .unwrap();
+    let mut profile = RelayProfile {
+        id: "agg".to_string(),
+        name: "Aggregate".to_string(),
+        relay_mode: RelayMode::Aggregate,
+        model: "shared-model".to_string(),
+        model_list: "shared-model".to_string(),
+        ..RelayProfile::default()
+    };
+    let expected = profile.clone();
+    let mut common = "model_reasoning_effort = \"high\"\n".to_string();
+    let expected_common = common.clone();
+
+    backfill_relay_profile_from_home_with_common(temp.path(), &mut profile, &mut common).unwrap();
+
+    assert_eq!(profile, expected);
+    assert_eq!(common, expected_common);
 }
 
 #[test]

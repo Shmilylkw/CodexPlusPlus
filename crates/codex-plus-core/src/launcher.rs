@@ -525,6 +525,10 @@ impl LaunchHooks for DefaultLaunchHooks {
             return Ok(());
         }
         let profile = settings.active_relay_profile_with_aggregate_models();
+        if profile.relay_mode == crate::settings::RelayMode::Aggregate {
+            crate::relay_rotation::RelayRotationSelector::from_settings(settings)
+                .context("聚合供应商配置无效")?;
+        }
         let home = crate::relay_config::default_codex_home_dir();
         let common_config = crate::relay_config::normalize_config_text(
             &[

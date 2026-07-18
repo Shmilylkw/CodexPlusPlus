@@ -135,6 +135,10 @@ fn apply_selected_relay_profile(
     settings: &BackendSettings,
 ) -> anyhow::Result<RelaySwitchResult> {
     let relay = settings.active_relay_profile_with_aggregate_models();
+    if relay.relay_mode == RelayMode::Aggregate {
+        crate::relay_rotation::RelayRotationSelector::from_settings(settings)
+            .context("聚合供应商配置无效")?;
+    }
     let common_config = relay_combined_common_config(settings);
     let result = if relay.relay_mode == RelayMode::Official && !relay.official_mix_api_key {
         let auth_contents =

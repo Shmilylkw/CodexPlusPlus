@@ -9,6 +9,7 @@ use tauri::{Emitter, Manager, WindowEvent};
 
 const TRAY_ID: &str = "codex_plus_tray";
 static APP_EXITING: AtomicBool = AtomicBool::new(false);
+static CLOSE_REQUEST_PENDING: AtomicBool = AtomicBool::new(false);
 const TRAY_MENU_SHOW: &str = "tray_show_main";
 const TRAY_MENU_DREAM_SKIN_APPLY: &str = "tray_apply_dream_skin";
 const TRAY_MENU_QUIT: &str = "tray_quit_app";
@@ -146,6 +147,7 @@ pub fn run() {
             commands::apply_pure_api_injection,
             commands::clear_relay_injection,
             manager_exit_app,
+            manager_take_close_request,
             manager_minimize_to_taskbar,
             update_tray_labels
         ])
@@ -223,6 +225,7 @@ fn register_main_window_events<R: tauri::Runtime>(window: tauri::WebviewWindow<R
             }
 
             api.prevent_close();
+            CLOSE_REQUEST_PENDING.store(true, Ordering::SeqCst);
             let _ = close_event_window.emit("manager://close-requested", ());
         }
         _ => {}
@@ -233,6 +236,24 @@ fn register_main_window_events<R: tauri::Runtime>(window: tauri::WebviewWindow<R
 fn manager_exit_app<R: tauri::Runtime>(app: tauri::AppHandle<R>) {
     APP_EXITING.store(true, Ordering::SeqCst);
     app.exit(0);
+}
+
+#[tauri::command]
+fn manager_take_close_request() -> bool {
+    CLOSE_REQUEST_PENDING.swap(false, Ordering::SeqCst)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn pending_close_request_is_consumed_once() {
+        CLOSE_REQUEST_PENDING.store(true, Ordering::SeqCst);
+
+        assert!(manager_take_close_request());
+        assert!(!manager_take_close_request());
+    }
 }
 
 #[tauri::command]

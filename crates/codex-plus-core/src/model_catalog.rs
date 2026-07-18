@@ -39,7 +39,7 @@ pub async fn read_codex_model_catalog() -> Value {
     let settings_path = crate::paths::default_settings_path();
     if settings_path.exists() {
         if let Ok(settings) = SettingsStore::new(settings_path).load() {
-            let profile = settings.active_relay_profile();
+            let profile = settings.active_relay_profile_with_aggregate_models();
             let catalog = relay_profile_model_catalog_value(&home, &profile);
             if catalog
                 .get("models")
@@ -490,6 +490,7 @@ async fn fetch_models_from_source(
 
     let mut request = client
         .get(&endpoint)
+        .timeout(std::time::Duration::from_secs(30))
         .header(reqwest::header::ACCEPT, "application/json");
     if !source.api_key.is_empty() {
         request = request.bearer_auth(&source.api_key);

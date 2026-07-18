@@ -64,9 +64,15 @@ fn manager_close_prompts_before_minimizing_to_taskbar_or_exiting() {
     assert!(lib_rs.contains("TRAY_MENU_DREAM_SKIN_APPLY"));
     assert!(lib_rs.contains("update_tray_labels"));
     assert!(lib_rs.contains("manager://close-requested"));
+    assert!(lib_rs.contains("CLOSE_REQUEST_PENDING.store(true"));
+    assert!(lib_rs.contains("fn manager_take_close_request() -> bool"));
+    assert!(lib_rs.contains("CLOSE_REQUEST_PENDING.swap(false"));
     assert!(lib_rs.contains("fn manager_minimize_to_taskbar"));
     assert!(lib_rs.contains("let _ = window.minimize();"));
     assert!(app_tsx.contains("CloseConfirmDialog"));
+    assert!(app_tsx.contains("manager_take_close_request"));
+    assert!(app_tsx.contains("runCloseChoiceAfterDreamSkinDraftGuard(exitManagerApp)"));
+    assert!(app_tsx.contains("runCloseChoiceAfterDreamSkinDraftGuard(minimizeManagerToTaskbar)"));
     assert!(app_tsx.contains("manager_exit_app"));
     assert!(app_tsx.contains("manager_minimize_to_taskbar"));
     assert!(app_tsx.contains("最小化到任务栏"));

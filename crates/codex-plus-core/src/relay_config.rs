@@ -426,7 +426,7 @@ pub fn apply_relay_profile_to_home_with_switch_rules_and_computer_use_guard(
             preserve_computer_use_guard,
         )
     } else if profile.relay_mode == crate::settings::RelayMode::Aggregate {
-        let auth_contents = aggregate_profile_auth_for_switch()?;
+        let auth_contents = aggregate_profile_auth_for_switch(home)?;
         apply_relay_files_to_home_with_computer_use_guard(
             home,
             &config_with_catalog,
@@ -548,6 +548,7 @@ pub async fn test_relay_profile(
         .bearer_auth(api_key)
         .header(reqwest::header::CONTENT_TYPE, "application/json")
         .json(&payload)
+        .timeout(std::time::Duration::from_secs(30))
         .send()
         .await?;
     let http_status = response.status().as_u16();
@@ -566,6 +567,7 @@ pub async fn test_relay_profile(
             .bearer_auth(api_key)
             .header(reqwest::header::CONTENT_TYPE, "application/json")
             .json(&payload)
+            .timeout(std::time::Duration::from_secs(30))
             .send()
             .await?;
         let v1_status = v1_response.status().as_u16();
@@ -693,6 +695,9 @@ pub fn backfill_relay_profile_from_home(
     home: &Path,
     profile: &mut RelayProfile,
 ) -> anyhow::Result<()> {
+    if profile.relay_mode == crate::settings::RelayMode::Aggregate {
+        return Ok(());
+    }
     profile.config_contents = read_optional_text(&home.join("config.toml"))?;
     profile.auth_contents = read_optional_text(&home.join("auth.json"))?;
     let live_config = profile.config_contents.clone();
@@ -710,6 +715,9 @@ pub fn backfill_relay_profile_from_home_with_common(
     profile: &mut RelayProfile,
     common_config_contents: &mut String,
 ) -> anyhow::Result<()> {
+    if profile.relay_mode == crate::settings::RelayMode::Aggregate {
+        return Ok(());
+    }
     let live_config = read_optional_text(&home.join("config.toml"))?;
     let template_config = profile.config_contents.clone();
     let template_auth = profile.auth_contents.clone();
@@ -1986,10 +1994,23 @@ fn official_profile_auth_for_switch(home: &Path, auth_contents: &str) -> anyhow:
     remove_openai_api_key_from_auth_contents(&source)
 }
 
-fn aggregate_profile_auth_for_switch() -> anyhow::Result<String> {
-    Ok(serde_json::to_string_pretty(&json!({
-        "OPENAI_API_KEY": "codex-plus-aggregate"
-    }))?)
+fn aggregate_profile_auth_for_switch(home: &Path) -> anyhow::Result<String> {
+    let source = read_optional_text(&home.join("auth.json"))?;
+    let mut auth = if source.trim().is_empty() {
+        json!({})
+    } else {
+        serde_json::from_str::<Value>(&source).unwrap_or_else(|_| json!({}))
+    };
+    if !auth.is_object() {
+        auth = json!({});
+    }
+    auth.as_object_mut()
+        .expect("aggregate auth JSON is normalized to an object")
+        .insert(
+            "OPENAI_API_KEY".to_string(),
+            Value::String("codex-plus-aggregate".to_string()),
+        );
+    Ok(serde_json::to_string_pretty(&auth)?)
 }
 
 fn codex_auth_api_key(auth_contents: &str) -> Option<String> {
